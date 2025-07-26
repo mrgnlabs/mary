@@ -1,7 +1,6 @@
 # Mary 
 **The next-generation friendly neighborhood Marginfi Liquidator**
 
-![Mary](Mary.jpeg)
 # Configure
 Environment variables are used to configure the application, making it easier to integrate with cloud services. The [template.env](template.env) outlines the environment variables needed to configure the application.
 
