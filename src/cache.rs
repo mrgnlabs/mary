@@ -32,7 +32,7 @@ impl Cache {
 }
 
 #[cfg(test)]
-mod test_util {
+pub mod test_util {
     use std::time::SystemTime;
 
     use solana_program::clock::Clock;
