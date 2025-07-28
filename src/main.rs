@@ -1,6 +1,9 @@
+mod cache;
+mod comms;
 mod config;
 mod service;
 
+use crate::comms::RpcCommsClient;
 use crate::{config::Config, service::MainService};
 use ctrlc;
 use env_logger::Builder;
@@ -54,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     let config = Config::new()?;
     info!("Configuration: {:?}", config);
 
-    let service = MainService::new(config, stop.clone());
+    let service = MainService::<RpcCommsClient>::new(config, stop.clone())?;
     service.run()?;
 
     Ok(())
