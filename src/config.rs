@@ -125,6 +125,7 @@ mod tests {
     #[serial]
     #[should_panic(expected = "Invalid STATS_INTERVAL_SEC value, must be a number")]
     fn test_config_invalid_stats_interval_sec() {
+        set_test_env();
         env::set_var("STATS_INTERVAL_SEC", "not_a_number");
         let _ = Config::new();
     }
