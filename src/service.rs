@@ -1,14 +1,16 @@
+mod geyser_subscriber;
+
 use std::{
     sync::{atomic::AtomicBool, Arc},
     thread,
 };
 
-use crate::cache::Cache;
 use crate::comms::CommsClient;
 use crate::config::Config;
-use anyhow::{anyhow, Result};
+use crate::{cache::Cache, service::geyser_subscriber::GeyserSubscriber};
+use anyhow::Result;
 use bincode::deserialize;
-use log::info;
+use log::{error, info};
 use solana_sdk::clock::Clock;
 use solana_sdk::sysvar;
 
@@ -17,6 +19,7 @@ pub struct MainService<T: CommsClient> {
     stats_interval_sec: u64,
     comms_client: T,
     cache: Arc<Cache>,
+    geyser_subscriber: Arc<GeyserSubscriber>,
 }
 
 impl<T: CommsClient> MainService<T> {
@@ -31,20 +34,32 @@ impl<T: CommsClient> MainService<T> {
         info!("Initializing the Cache...");
         let cache = Arc::new(Cache::new(clock));
 
-        // Init all services: geyser, liquidation, etc.
+        // Init Geyser services
+        info!("Initializing the Geyser Subscriber...");
+        let geyser_subscriber = GeyserSubscriber::new(&config, stop.clone(), cache.clone())?;
 
         Ok(MainService {
             stop,
             stats_interval_sec: config.stats_interval_sec,
             comms_client,
             cache,
+            geyser_subscriber: Arc::new(geyser_subscriber),
         })
     }
 
     pub fn run(&self) -> anyhow::Result<()> {
-        info!("Starting the services...");
+        info!("Starting services...");
 
-        info!("Entering the Main loop...");
+        info!("Starting Geyser Subscriber...");
+        let geyser_subscriber = self.geyser_subscriber.clone();
+        thread::spawn(move || {
+            if let Err(e) = geyser_subscriber.run() {
+                error!("GeyserSubscriber failed! {:?}", e);
+                panic!("Fatal error in GeyserSubscriber!");
+            }
+        });
+
+        info!("Entering the Main loop.");
         while !self.stop.load(std::sync::atomic::Ordering::SeqCst) {
             if let Err(err) = self.log_stats() {
                 eprintln!("Error logging stats: {}", err);
