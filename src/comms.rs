@@ -2,11 +2,12 @@ pub mod rpc_comms_client;
 
 pub use rpc_comms_client::RpcCommsClient;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
 use crate::config::Config;
 
+// TODO: consider renaming this trait to something more descriptive. Fetcher for example.
 pub trait CommsClient {
     fn new(config: &Config) -> Result<Self>
     where
@@ -17,6 +18,7 @@ pub trait CommsClient {
 
 #[cfg(test)]
 pub mod test_util {
+    use anyhow::{anyhow, Result};
     use std::collections::HashMap;
 
     use super::*;
