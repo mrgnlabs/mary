@@ -105,7 +105,7 @@ mod tests {
         let account = Account {
             lamports: 0,
             data: vec![1, 2, 3, 4], // Invalid data for Clock
-            owner: solana_sdk::pubkey::new_rand(),
+            owner: Pubkey::new_unique(),
             executable: false,
             rent_epoch: 0,
         };
