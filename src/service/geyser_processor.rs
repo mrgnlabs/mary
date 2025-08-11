@@ -54,7 +54,7 @@ impl GeyserProcessor {
         debug!("Processing Geyser message: {:?}", msg);
         match msg.message_type {
             GeyserMessageType::ClockUpdate => {
-                update_solana_clock(&self.cache, &msg.account)?;
+                process_clock_update(&self.cache, &msg.account)?;
             }
             _ => {
                 // Not yet
@@ -64,7 +64,7 @@ impl GeyserProcessor {
     }
 }
 
-fn update_solana_clock(cache: &Arc<Cache>, account: &Account) -> anyhow::Result<()> {
+fn process_clock_update(cache: &Arc<Cache>, account: &Account) -> anyhow::Result<()> {
     let clock: Clock = bincode::deserialize::<Clock>(&account.data)?;
     cache.update_clock(clock)?;
     Ok(())
@@ -90,7 +90,7 @@ mod tests {
 
         let clock: Clock = bincode::deserialize::<Clock>(&account.data).unwrap();
 
-        update_solana_clock(&cache, &account).unwrap();
+        process_clock_update(&cache, &account).unwrap();
 
         let result = cache.update_clock(clock.clone());
         assert!(result.is_ok());
@@ -110,7 +110,7 @@ mod tests {
             rent_epoch: 0,
         };
 
-        let result = update_solana_clock(&cache, &account);
+        let result = process_clock_update(&cache, &account);
         assert!(result.is_err());
     }
 }

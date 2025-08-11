@@ -1,6 +1,7 @@
 mod cache;
 mod comms;
 mod config;
+mod liquidation;
 mod service;
 
 use crate::comms::RpcCommsClient;
@@ -57,8 +58,8 @@ fn main() -> anyhow::Result<()> {
     let config = Config::new()?;
     info!("Configuration: {:?}", config);
 
-    let service = ServiceManager::<RpcCommsClient>::new(config, stop.clone())?;
-    service.start()?;
+    let service_manager = ServiceManager::<RpcCommsClient>::new(config, stop.clone())?;
+    service_manager.start()?;
 
     Ok(())
 }

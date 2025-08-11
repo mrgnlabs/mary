@@ -1,5 +1,7 @@
 mod geyser_processor;
 mod geyser_subscriber;
+mod liquidation_service;
+
 use std::{
     sync::{atomic::AtomicBool, Arc},
     thread,
@@ -48,6 +50,9 @@ impl<T: CommsClient> ServiceManager<T> {
         info!("Initializing the GeyserProcessor...");
         let geyser_processor = GeyserProcessor::new(stop.clone(), cache.clone(), geyser_rx);
 
+        info!("Initializing the LiquidationService...");
+        // TODO: let liquidation_service = LiquidationService::new();
+
         Ok(ServiceManager {
             stop,
             stats_interval_sec: config.stats_interval_sec,
@@ -76,6 +81,8 @@ impl<T: CommsClient> ServiceManager<T> {
                 panic!("Fatal error in GeyserSubscriber!");
             }
         });
+
+        // TODO: Start the LiquidationService
 
         info!("Entering the Main loop.");
         while !self.stop.load(std::sync::atomic::Ordering::SeqCst) {
