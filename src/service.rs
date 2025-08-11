@@ -1,28 +1,32 @@
+mod geyser_processor;
 mod geyser_subscriber;
-
 use std::{
     sync::{atomic::AtomicBool, Arc},
     thread,
 };
 
-use crate::comms::CommsClient;
 use crate::config::Config;
-use crate::{cache::Cache, service::geyser_subscriber::GeyserSubscriber};
+use crate::{
+    cache::Cache,
+    service::geyser_subscriber::{GeyserMessage, GeyserSubscriber},
+};
+use crate::{comms::CommsClient, service::geyser_processor::GeyserProcessor};
 use anyhow::Result;
 use bincode::deserialize;
 use log::{error, info};
 use solana_sdk::clock::Clock;
 use solana_sdk::sysvar;
 
-pub struct MainService<T: CommsClient> {
+pub struct ServiceManager<T: CommsClient> {
     stop: Arc<AtomicBool>,
     stats_interval_sec: u64,
     comms_client: T,
     cache: Arc<Cache>,
     geyser_subscriber: Arc<GeyserSubscriber>,
+    geyser_processor: Arc<GeyserProcessor>,
 }
 
-impl<T: CommsClient> MainService<T> {
+impl<T: CommsClient> ServiceManager<T> {
     pub fn new(config: Config, stop: Arc<AtomicBool>) -> Result<Self> {
         let comms_client = T::new(&config)?;
 
@@ -35,22 +39,36 @@ impl<T: CommsClient> MainService<T> {
         let cache = Arc::new(Cache::new(clock));
 
         // Init Geyser services
-        info!("Initializing the Geyser Subscriber...");
-        let geyser_subscriber = GeyserSubscriber::new(&config, stop.clone(), cache.clone())?;
+        let (geyser_tx, geyser_rx) = crossbeam::channel::unbounded::<GeyserMessage>();
 
-        Ok(MainService {
+        info!("Initializing the GeyserSubscriber...");
+        let geyser_subscriber =
+            GeyserSubscriber::new(&config, stop.clone(), cache.clone(), geyser_tx)?;
+
+        info!("Initializing the GeyserProcessor...");
+        let geyser_processor = GeyserProcessor::new(stop.clone(), cache.clone(), geyser_rx);
+
+        Ok(ServiceManager {
             stop,
             stats_interval_sec: config.stats_interval_sec,
             comms_client,
             cache,
             geyser_subscriber: Arc::new(geyser_subscriber),
+            geyser_processor: Arc::new(geyser_processor),
         })
     }
 
-    pub fn run(&self) -> anyhow::Result<()> {
+    pub fn start(&self) -> anyhow::Result<()> {
         info!("Starting services...");
 
-        info!("Starting Geyser Subscriber...");
+        let geyser_processor = self.geyser_processor.clone();
+        thread::spawn(move || {
+            if let Err(e) = geyser_processor.run() {
+                error!("GeyserProcessor failed! {:?}", e);
+                panic!("Fatal error in GeyserProcessor!");
+            }
+        });
+
         let geyser_subscriber = self.geyser_subscriber.clone();
         thread::spawn(move || {
             if let Err(e) = geyser_subscriber.run() {
@@ -96,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_fetch_clock() {
-        let clock = generate_test_clock();
+        let clock = generate_test_clock(1);
 
         let mut accounts = HashMap::new();
         accounts.insert(
