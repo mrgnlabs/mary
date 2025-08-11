@@ -73,6 +73,7 @@ pub struct GeyserSubscriber {
     subscribe_req: SubscribeRequest,
     tokio_rt: Runtime,
     cache: Arc<Cache>,
+    marginfi_program_id_bytes: [u8; 32],
     geyser_tx: Sender<GeyserMessage>,
 }
 
@@ -103,6 +104,7 @@ impl GeyserSubscriber {
             subscribe_req,
             tokio_rt,
             cache,
+            marginfi_program_id_bytes: config.marginfi_program_id.to_bytes(),
             geyser_tx,
         })
     }
@@ -126,9 +128,12 @@ impl GeyserSubscriber {
             while let Some(msg) = self.tokio_rt.block_on(stream.next()) {
                 match msg {
                     Ok(event) => {
-                        if let Err(e) =
-                            handle_event(&self.cache.get_clock()?, &self.geyser_tx, &event)
-                        {
+                        if let Err(e) = handle_event(
+                            &self.marginfi_program_id_bytes,
+                            &self.cache.get_clock()?,
+                            &self.geyser_tx,
+                            &event,
+                        ) {
                             error!("Error handling Geyser update {:?}: {}", event, e);
                         }
                     }
@@ -173,6 +178,7 @@ fn build_geyser_subscribe_request(tracked_accounts: &[Pubkey]) -> Result<Subscri
 }
 
 fn handle_event(
+    marginfi_program_id_bytes: &[u8; 32], //TODO: come up with better way to use it in the method without passing
     clock: &Clock,
     geyser_tx: &Sender<GeyserMessage>,
     event: &SubscribeUpdate,
@@ -184,6 +190,18 @@ fn handle_event(
             if subscribe_account.slot >= clock.slot =>
         {
             if let Some(account) = &subscribe_account.account {
+                if account.owner == marginfi_program_id_bytes {
+                    debug!("Received Marginfi update: {:?}", event);
+                } else if account.owner == sysvar::clock::id().to_bytes() {
+                    debug!("Received Solana clock update: {:?}", event);
+                    let msg = GeyserMessage::new(
+                        GeyserMessageType::ClockUpdate,
+                        subscribe_account.slot,
+                        account.clone(),
+                    )?;
+                    geyser_tx.send(msg)?;
+                }
+
                 if account.pubkey == SOLANA_CLOCK_BYTES {
                     debug!("Received Solana clock update: {:?}", event);
                     let msg = GeyserMessage::new(
@@ -208,6 +226,8 @@ mod tests {
     use crate::cache::test_util::generate_test_clock;
 
     use super::*;
+
+    static MARGINFI_PROGRAM_ID_BYTES: [u8; 32] = [1u8; 32];
 
     fn make_account_info(pubkey: Pubkey) -> SubscribeUpdateAccountInfo {
         SubscribeUpdateAccountInfo {
@@ -240,7 +260,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = handle_event(&clock, &tx, &event);
+        let result = handle_event(&MARGINFI_PROGRAM_ID_BYTES, &clock, &tx, &event);
         assert!(result.is_ok());
 
         // Should have sent a message
@@ -269,7 +289,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = handle_event(&clock, &tx, &event);
+        let result = handle_event(&MARGINFI_PROGRAM_ID_BYTES, &clock, &tx, &event);
         assert!(result.is_ok());
 
         // Should NOT have sent a message
@@ -294,7 +314,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = handle_event(&clock, &tx, &event);
+        let result = handle_event(&MARGINFI_PROGRAM_ID_BYTES, &clock, &tx, &event);
         assert!(result.is_ok());
 
         // Should NOT have sent a message
@@ -316,7 +336,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = handle_event(&clock, &tx, &event);
+        let result = handle_event(&MARGINFI_PROGRAM_ID_BYTES, &clock, &tx, &event);
         assert!(result.is_ok());
 
         // Should NOT have sent a message
@@ -332,7 +352,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = handle_event(&clock, &tx, &event);
+        let result = handle_event(&MARGINFI_PROGRAM_ID_BYTES, &clock, &tx, &event);
         assert!(result.is_ok());
 
         // Should NOT have sent a message
