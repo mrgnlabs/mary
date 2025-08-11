@@ -5,7 +5,10 @@ use std::sync::{
 
 use crossbeam::channel::Receiver;
 use log::{debug, error, info};
+use marginfi::state::{marginfi_account::MarginfiAccount, marginfi_group::Bank};
 use solana_sdk::{account::Account, clock::Clock};
+// Add the trait import for try_deserialize (adjust if you use a different crate)
+use anchor_lang::AccountDeserialize;
 
 use crate::{
     cache::Cache,
@@ -36,8 +39,8 @@ impl GeyserProcessor {
         while !self.stop.load(Ordering::Relaxed) {
             match self.geyser_rx.recv() {
                 Ok(msg) => {
-                    if let Err(err) = self.process_message(msg) {
-                        error!("Failed to process Geyser message: {}", err);
+                    if let Err(err) = self.process_message(&msg) {
+                        error!("Failed to process Geyser message {:?}: {}", msg, err);
                     }
                 }
                 Err(error) => {
@@ -50,11 +53,16 @@ impl GeyserProcessor {
         Ok(())
     }
 
-    fn process_message(&self, msg: GeyserMessage) -> anyhow::Result<()> {
-        debug!("Processing Geyser message: {:?}", msg);
+    fn process_message(&self, msg: &GeyserMessage) -> anyhow::Result<()> {
         match msg.message_type {
             GeyserMessageType::ClockUpdate => {
                 process_clock_update(&self.cache, &msg.account)?;
+            }
+            GeyserMessageType::MarginfiAccountUpdate => {
+                process_marginfi_account_update(&self.cache, &msg)?;
+            }
+            GeyserMessageType::MarginfiBankUpdate => {
+                process_marginfi_bank_update(&self.cache, &msg)?;
             }
             _ => {
                 // Not yet
@@ -65,12 +73,31 @@ impl GeyserProcessor {
 }
 
 fn process_clock_update(cache: &Arc<Cache>, account: &Account) -> anyhow::Result<()> {
+    debug!("Processing Clock update: {:?}", account);
     let clock: Clock = bincode::deserialize::<Clock>(&account.data)?;
     cache.update_clock(clock)?;
     Ok(())
 }
+
+fn process_marginfi_account_update(cache: &Arc<Cache>, msg: &GeyserMessage) -> anyhow::Result<()> {
+    debug!("Processing Marginfi account update: {:?}", msg);
+    let marginfi_account: MarginfiAccount =
+        MarginfiAccount::try_deserialize(&mut msg.account.data.as_slice())?;
+    //    cache.update_marginfi_account(marginfi_account)?;
+    Ok(())
+}
+
+fn process_marginfi_bank_update(cache: &Arc<Cache>, msg: &GeyserMessage) -> anyhow::Result<()> {
+    debug!("Processing Marginfi bank update: {:?}", msg);
+    let bank: Bank = Bank::try_deserialize(&mut msg.account.data.as_slice())?;
+    //    cache.update_marginfi_account(marginfi_account)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use solana_sdk::pubkey::Pubkey;
+
     use crate::cache::test_util::generate_test_clock;
 
     use super::*;

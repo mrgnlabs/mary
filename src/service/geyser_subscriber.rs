@@ -22,6 +22,11 @@ use yellowstone_grpc_proto::{geyser::SubscribeRequestFilterAccounts, prelude::Su
 
 const SOLANA_CLOCK_BYTES: [u8; 32] = sysvar::clock::id().to_bytes();
 
+const MARGINFI_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
+const MARGINFI_ACCOUNT_DISCRIMINATOR_LEN: usize = MARGINFI_ACCOUNT_DISCRIMINATOR.len();
+const MARGINFI_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
+const MARGINFI_BANK_DISCRIMINATOR_LEN: usize = MARGINFI_BANK_DISCRIMINATOR.len();
+
 // TODO: Is there better home for Geysermessage and GeyserMessageType?
 #[derive(Debug)]
 pub enum GeyserMessageType {
@@ -84,11 +89,10 @@ impl GeyserSubscriber {
         cache: Arc<Cache>,
         geyser_tx: Sender<GeyserMessage>,
     ) -> Result<Self> {
-        let tracked_accounts = get_tracked_accounts();
-
         let tls_config = ClientTlsConfig::new().with_native_roots();
 
-        let subscribe_req = build_geyser_subscribe_request(&tracked_accounts)?;
+        let marginfi_program_id = config.marginfi_program_id;
+        let subscribe_req = build_geyser_subscribe_request(marginfi_program_id)?;
 
         let tokio_rt = Builder::new_multi_thread()
             .thread_name("GeyserService")
@@ -155,26 +159,25 @@ impl GeyserSubscriber {
     }
 }
 
-fn get_tracked_accounts() -> Vec<Pubkey> {
-    // Placeholder for actual logic to get tracked accounts
-    vec![sysvar::clock::id()]
-}
+fn build_geyser_subscribe_request(marginfi_program_id: Pubkey) -> Result<SubscribeRequest> {
+    let mut account_filters: HashMap<String, SubscribeRequestFilterAccounts> = HashMap::new();
 
-fn build_geyser_subscribe_request(tracked_accounts: &[Pubkey]) -> Result<SubscribeRequest> {
-    // Accounts
-    let accounts = SubscribeRequestFilterAccounts {
-        account: tracked_accounts.iter().map(|a| a.to_string()).collect(),
+    let clock_filter = SubscribeRequestFilterAccounts {
+        account: vec![sysvar::clock::id().to_string()],
         ..Default::default()
     };
+    account_filters.insert("SolanaClock".to_string(), clock_filter);
 
-    let request = SubscribeRequest {
-        accounts: HashMap::from([("Accounts".to_string(), accounts)]),
+    let marginfi_program_filter = SubscribeRequestFilterAccounts {
+        owner: vec![marginfi_program_id.to_string()],
         ..Default::default()
     };
+    account_filters.insert("MarginfiProgram".to_string(), marginfi_program_filter);
 
-    // Program
-
-    Ok(request)
+    Ok(SubscribeRequest {
+        accounts: account_filters,
+        ..Default::default()
+    })
 }
 
 fn handle_event(
@@ -192,17 +195,15 @@ fn handle_event(
             if let Some(account) = &subscribe_account.account {
                 if account.owner == marginfi_program_id_bytes {
                     debug!("Received Marginfi update: {:?}", event);
-                } else if account.owner == sysvar::clock::id().to_bytes() {
-                    debug!("Received Solana clock update: {:?}", event);
-                    let msg = GeyserMessage::new(
-                        GeyserMessageType::ClockUpdate,
-                        subscribe_account.slot,
-                        account.clone(),
-                    )?;
-                    geyser_tx.send(msg)?;
-                }
-
-                if account.pubkey == SOLANA_CLOCK_BYTES {
+                    if let Some(message_type) = get_marginfi_message_type(&account.data) {
+                        let msg = GeyserMessage::new(
+                            message_type,
+                            subscribe_account.slot,
+                            account.clone(),
+                        )?;
+                        geyser_tx.send(msg)?;
+                    }
+                } else if account.pubkey == SOLANA_CLOCK_BYTES {
                     debug!("Received Solana clock update: {:?}", event);
                     let msg = GeyserMessage::new(
                         GeyserMessageType::ClockUpdate,
@@ -218,14 +219,32 @@ fn handle_event(
 
     Ok(())
 }
+
+fn get_marginfi_message_type(account_data: &[u8]) -> Option<GeyserMessageType> {
+    if account_data.len() > MARGINFI_ACCOUNT_DISCRIMINATOR_LEN
+        && account_data.starts_with(&MARGINFI_ACCOUNT_DISCRIMINATOR)
+    {
+        Some(GeyserMessageType::MarginfiAccountUpdate)
+    } else if account_data.len() > MARGINFI_BANK_DISCRIMINATOR_LEN
+        && account_data.starts_with(&MARGINFI_BANK_DISCRIMINATOR)
+    {
+        Some(GeyserMessageType::MarginfiBankUpdate)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crossbeam::channel;
+    use marginfi::state::marginfi_group::Bank;
     use yellowstone_grpc_proto::geyser::SubscribeUpdateAccount;
 
     use crate::cache::test_util::generate_test_clock;
 
     use super::*;
+    use anchor_lang::Discriminator;
+    use marginfi::state::marginfi_account::MarginfiAccount;
 
     static MARGINFI_PROGRAM_ID_BYTES: [u8; 32] = [1u8; 32];
 
@@ -357,5 +376,11 @@ mod tests {
 
         // Should NOT have sent a message
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn print_discriminators() {
+        println!("MarginfiAccount: {:?}", MarginfiAccount::DISCRIMINATOR);
+        println!("Marginfi Bank {:?}", Bank::DISCRIMINATOR);
     }
 }
