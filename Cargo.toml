@@ -19,6 +19,12 @@ yellowstone-grpc-proto = { git = "https://github.com/rpcpool/yellowstone-grpc", 
 tokio = { version = "1.47.0" }
 futures = "0.3.30"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+anchor-lang = { version = "0.31.1" }
+
+[dependencies.marginfi]
+git = "https://github.com/mrgnlabs/marginfi-v2"
+tag = "mrgn-0.1.4-rc1"
+features = ["mainnet-beta", "client", "no-entrypoint"]
 
 [dev-dependencies]
 serial_test = "3.2.0"
