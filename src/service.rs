@@ -98,7 +98,11 @@ impl<T: CommsClient> ServiceManager<T> {
 
     pub fn log_stats(&self) -> anyhow::Result<()> {
         let clock = self.cache.get_clock()?;
-        info!("Stats: [Solana Clock: {:?}; ]", clock);
+        let queue_depth = self.geyser_processor.queue_depth();
+        info!(
+            "Stats: [Latest Slot: {:?}; Geyser Queue Depth: {}]",
+            clock.slot, queue_depth
+        );
         Ok(())
     }
 }
