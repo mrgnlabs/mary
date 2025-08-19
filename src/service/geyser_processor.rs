@@ -59,10 +59,10 @@ impl GeyserProcessor {
                 process_clock_update(&self.cache, &msg.account)?;
             }
             GeyserMessageType::MarginfiAccountUpdate => {
-                process_marginfi_account_update(&self.cache, &msg)?;
+                process_marginfi_account_update(&self.cache, msg)?;
             }
             GeyserMessageType::MarginfiBankUpdate => {
-                process_marginfi_bank_update(&self.cache, &msg)?;
+                process_marginfi_bank_update(&self.cache, msg)?;
             }
             _ => {
                 // Not yet
@@ -83,7 +83,9 @@ fn process_marginfi_account_update(cache: &Arc<Cache>, msg: &GeyserMessage) -> a
     debug!("Processing Marginfi account update: {:?}", msg);
     let marginfi_account: MarginfiAccount =
         MarginfiAccount::try_deserialize(&mut msg.account.data.as_slice())?;
-    //    cache.update_marginfi_account(marginfi_account)?;
+    cache
+        .marginfi_accounts
+        .update(msg.slot, msg.address, &marginfi_account)?;
     Ok(())
 }
 

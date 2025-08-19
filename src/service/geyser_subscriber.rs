@@ -38,8 +38,8 @@ pub enum GeyserMessageType {
 #[derive(Debug)]
 pub struct GeyserMessage {
     pub(crate) message_type: GeyserMessageType,
-    slot: u64,
-    address: Pubkey,
+    pub(crate) slot: u64,
+    pub(crate) address: Pubkey,
     pub(crate) account: Account,
 }
 

@@ -1,16 +1,22 @@
+mod marginfi_accounts;
+
 use std::sync::RwLock;
 
 use anyhow::{anyhow, Result};
 use solana_program::clock::Clock;
 
+use crate::cache::marginfi_accounts::MarginfiAccountsCache;
+
 pub struct Cache {
     pub clock: RwLock<Clock>,
+    pub marginfi_accounts: MarginfiAccountsCache,
 }
 
 impl Cache {
     pub fn new(clock: Clock) -> Self {
-        Cache {
+        Self {
             clock: RwLock::new(clock),
+            marginfi_accounts: MarginfiAccountsCache::default(),
         }
     }
 
