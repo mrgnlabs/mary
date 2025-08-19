@@ -1,15 +1,25 @@
+mod banks;
 mod marginfi_accounts;
 
 use std::sync::RwLock;
 
 use anyhow::{anyhow, Result};
+use log::{debug, trace};
 use solana_program::clock::Clock;
+use solana_sdk::pubkey::Pubkey;
 
-use crate::cache::marginfi_accounts::MarginfiAccountsCache;
+use crate::cache::{banks::BanksCache, marginfi_accounts::MarginfiAccountsCache};
+
+// TODO: not completely sure that this trait is really needed.
+pub trait CacheEntry {
+    fn slot(&self) -> u64;
+    fn address(&self) -> Pubkey;
+}
 
 pub struct Cache {
     pub clock: RwLock<Clock>,
     pub marginfi_accounts: MarginfiAccountsCache,
+    pub banks: BanksCache,
 }
 
 impl Cache {
@@ -17,10 +27,12 @@ impl Cache {
         Self {
             clock: RwLock::new(clock),
             marginfi_accounts: MarginfiAccountsCache::default(),
+            banks: BanksCache::default(),
         }
     }
 
     pub fn update_clock(&self, clock: Clock) -> Result<()> {
+        trace!("Updating Clock in cache: {:?}", clock);
         *self
             .clock
             .write()

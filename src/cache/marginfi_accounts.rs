@@ -2,9 +2,13 @@ use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::anyhow;
 use fixed::types::I80F48;
+use log::debug;
 use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
+use crate::cache::CacheEntry;
+
+#[derive(Debug)]
 pub struct CachedPosition {
     pub bank: Pubkey,
     // TODO: make sure that we really need to use the I80F48 type here. It depends on what type is used for calling the protocol API
@@ -22,12 +26,23 @@ impl CachedPosition {
     }
 }
 
+#[derive(Debug)]
 pub struct CachedMarginfiAccount {
-    pub slot: u64,
-    pub address: Pubkey,
+    slot: u64,
+    address: Pubkey,
     pub group: Pubkey,
     pub health: u64,
     pub positions: Vec<CachedPosition>,
+}
+
+impl CacheEntry for CachedMarginfiAccount {
+    fn slot(&self) -> u64 {
+        self.slot
+    }
+
+    fn address(&self) -> Pubkey {
+        self.address
+    }
 }
 
 impl CachedMarginfiAccount {
@@ -63,6 +78,7 @@ impl MarginfiAccountsCache {
         account: &MarginfiAccount,
     ) -> anyhow::Result<()> {
         let cached_account = CachedMarginfiAccount::from(slot, address, account);
+        debug!("Updating Marginfi account in cache: {:?}", cached_account);
         self.accounts
             .write()
             .map_err(|e| {

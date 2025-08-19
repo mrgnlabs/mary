@@ -1,3 +1,4 @@
+use std::fmt;
 use std::{
     collections::HashMap,
     sync::{
@@ -10,7 +11,7 @@ use crate::{cache::Cache, config::Config};
 use anyhow::{anyhow, Result};
 use crossbeam::channel::Sender;
 use futures::stream::StreamExt; // Brings `next` into scope for streams
-use log::{debug, error, info, trace};
+use log::{error, info, trace};
 use solana_sdk::sysvar;
 use solana_sdk::{account::Account, clock::Clock, pubkey::Pubkey};
 use tokio::runtime::{Builder, Runtime};
@@ -28,7 +29,7 @@ const MARGINFI_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188
 const MARGINFI_BANK_DISCRIMINATOR_LEN: usize = MARGINFI_BANK_DISCRIMINATOR.len();
 
 // TODO: Is there better home for Geysermessage and GeyserMessageType?
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum GeyserMessageType {
     ClockUpdate,
     MarginfiAccountUpdate,
@@ -67,6 +68,16 @@ impl GeyserMessage {
                 rent_epoch: geyser_update_account.rent_epoch,
             },
         })
+    }
+}
+
+impl fmt::Display for GeyserMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[type: {:?}, slot: {}, address: {}]",
+            self.message_type, self.slot, self.address,
+        )
     }
 }
 
@@ -186,15 +197,13 @@ fn handle_event(
     geyser_tx: &Sender<GeyserMessage>,
     event: &SubscribeUpdate,
 ) -> Result<()> {
-    trace!("Handling Geyser update: {:?}", event);
-
     match &event.update_oneof {
         Some(subscribe_update::UpdateOneof::Account(subscribe_account))
             if subscribe_account.slot >= clock.slot =>
         {
             if let Some(account) = &subscribe_account.account {
                 if account.owner == marginfi_program_id_bytes {
-                    debug!("Received Marginfi update: {:?}", event);
+                    trace!("Handling Marginfi update: {:?}", event);
                     if let Some(message_type) = get_marginfi_message_type(&account.data) {
                         let msg = GeyserMessage::new(
                             message_type,
@@ -204,7 +213,7 @@ fn handle_event(
                         geyser_tx.send(msg)?;
                     }
                 } else if account.pubkey == SOLANA_CLOCK_BYTES {
-                    debug!("Received Solana clock update: {:?}", event);
+                    trace!("Handling Solana clock update: {:?}", event);
                     let msg = GeyserMessage::new(
                         GeyserMessageType::ClockUpdate,
                         subscribe_account.slot,
@@ -214,7 +223,9 @@ fn handle_event(
                 }
             }
         }
-        _ => {}
+        _ => {
+            trace!("Handling Geyser update: {:?}", event);
+        }
     }
 
     Ok(())
@@ -382,5 +393,40 @@ mod tests {
     fn print_discriminators() {
         println!("MarginfiAccount: {:?}", MarginfiAccount::DISCRIMINATOR);
         println!("Marginfi Bank {:?}", Bank::DISCRIMINATOR);
+    }
+
+    #[test]
+    fn test_get_marginfi_message_type_account_update() {
+        // Data starts with MARGINFI_ACCOUNT_DISCRIMINATOR and is longer than discriminator
+        let mut data = MARGINFI_ACCOUNT_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&[0, 1, 2, 3]);
+        let result = get_marginfi_message_type(&data);
+        assert_eq!(result, Some(GeyserMessageType::MarginfiAccountUpdate));
+    }
+
+    #[test]
+    fn test_get_marginfi_message_type_bank_update() {
+        // Data starts with MARGINFI_BANK_DISCRIMINATOR and is longer than discriminator
+        let mut data = MARGINFI_BANK_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&[4, 5, 6, 7]);
+        let result = get_marginfi_message_type(&data);
+        assert_eq!(result, Some(GeyserMessageType::MarginfiBankUpdate));
+    }
+
+    #[test]
+    fn test_get_marginfi_message_type_too_short() {
+        // Data is shorter than both discriminators
+        let data = vec![1, 2, 3];
+        let result = get_marginfi_message_type(&data);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_get_marginfi_message_type_wrong_discriminator() {
+        // Data does not start with any known discriminator
+        let mut data = vec![9, 9, 9, 9, 9, 9, 9, 9];
+        data.extend_from_slice(&[0, 1, 2, 3]);
+        let result = get_marginfi_message_type(&data);
+        assert_eq!(result, None);
     }
 }
