@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use fixed::types::I80F48;
 use log::debug;
 use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
@@ -8,7 +8,7 @@ use solana_sdk::pubkey::Pubkey;
 
 use crate::cache::CacheEntry;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedPosition {
     pub bank: Pubkey,
     // TODO: make sure that we really need to use the I80F48 type here. It depends on what type is used for calling the protocol API
@@ -26,12 +26,12 @@ impl CachedPosition {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedMarginfiAccount {
     slot: u64,
     address: Pubkey,
     pub group: Pubkey,
-    pub health: u64,
+    pub health: u64, // account.health_cache.asset_value_maint - liab_value_maint cast to max hashmap max size
     pub positions: Vec<CachedPosition>,
 }
 
@@ -60,7 +60,7 @@ impl CachedMarginfiAccount {
             address,
             group: marginfi_account.group,
             health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
-            positions,
+            positions: positions,
         }
     }
 }
@@ -68,27 +68,64 @@ impl CachedMarginfiAccount {
 #[derive(Default)]
 pub struct MarginfiAccountsCache {
     accounts: RwLock<HashMap<Pubkey, CachedMarginfiAccount>>,
+    account_to_health: RwLock<HashMap<Pubkey, u64>>,
 }
 
 impl MarginfiAccountsCache {
-    pub fn update(
-        &self,
-        slot: u64,
-        address: Pubkey,
-        account: &MarginfiAccount,
-    ) -> anyhow::Result<()> {
+    pub fn update(&self, slot: u64, address: Pubkey, account: &MarginfiAccount) -> Result<()> {
         let cached_account = CachedMarginfiAccount::from(slot, address, account);
         debug!("Updating Marginfi account in cache: {:?}", cached_account);
+
+        let account_health = cached_account.health;
+
         self.accounts
             .write()
             .map_err(|e| {
                 anyhow!(
-                    "Failed to lock the marginfi accounts cache for update! {}",
+                    "Failed to lock the Marginfi accounts cache for update! {}",
                     e
                 )
             })?
             .insert(address, cached_account);
+
+        self.account_to_health
+            .write()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to lock the Marginfi account health cache for update! {}",
+                    e
+                )
+            })?
+            .insert(address, account_health);
+
         Ok(())
+    }
+
+    pub fn get_account(&self, address: &Pubkey) -> Result<CachedMarginfiAccount> {
+        self.accounts
+            .read()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to lock the Marginfi accounts cache for getting an account: {}",
+                    e
+                )
+            })?
+            .get(address)
+            .cloned()
+            .ok_or_else(|| anyhow!("Account {} not found in cache", address))
+    }
+
+    pub fn get_accounts_with_health(&self) -> Result<HashMap<Pubkey, u64>> {
+        Ok(self
+            .account_to_health
+            .read()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to lock the Marginfi account health cache for cloning: {}",
+                    e
+                )
+            })?
+            .clone())
     }
 }
 

@@ -8,7 +8,7 @@ use solana_sdk::{account::Account, pubkey::Pubkey};
 use crate::config::Config;
 
 // TODO: consider renaming this trait to something more descriptive. Fetcher for example.
-pub trait CommsClient {
+pub trait CommsClient: Send + Sync {
     fn new(config: &Config) -> Result<Self>
     where
         Self: Sized;

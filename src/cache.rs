@@ -1,10 +1,10 @@
 mod banks;
-mod marginfi_accounts;
+pub mod marginfi_accounts;
 
 use std::sync::RwLock;
 
 use anyhow::{anyhow, Result};
-use log::{debug, trace};
+use log::trace;
 use solana_program::clock::Clock;
 use solana_sdk::pubkey::Pubkey;
 

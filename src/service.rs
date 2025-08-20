@@ -7,33 +7,32 @@ use std::{
     thread,
 };
 
-use crate::config::Config;
 use crate::{
     cache::Cache,
     service::geyser_subscriber::{GeyserMessage, GeyserSubscriber},
 };
 use crate::{comms::CommsClient, service::geyser_processor::GeyserProcessor};
+use crate::{config::Config, service::liquidation_service::LiquidationService};
 use anyhow::Result;
 use bincode::deserialize;
 use log::{error, info};
 use solana_sdk::clock::Clock;
 use solana_sdk::sysvar;
 
-pub struct ServiceManager<T: CommsClient> {
+pub struct ServiceManager<T: CommsClient + 'static> {
     stop: Arc<AtomicBool>,
     stats_interval_sec: u64,
-    comms_client: T,
     cache: Arc<Cache>,
     geyser_subscriber: Arc<GeyserSubscriber>,
     geyser_processor: Arc<GeyserProcessor>,
+    liquidation_service: Arc<LiquidationService<T>>,
 }
 
-impl<T: CommsClient> ServiceManager<T> {
+impl<T: CommsClient + 'static> ServiceManager<T> {
     pub fn new(config: Config, stop: Arc<AtomicBool>) -> Result<Self> {
-        let comms_client = T::new(&config)?;
-
         // Fetch clock
         info!("Fetching the Solana Clock...");
+        let comms_client = T::new(&config)?;
         let clock = fetch_clock(&comms_client)?;
 
         // Init cache
@@ -51,15 +50,16 @@ impl<T: CommsClient> ServiceManager<T> {
         let geyser_processor = GeyserProcessor::new(stop.clone(), cache.clone(), geyser_rx);
 
         info!("Initializing the LiquidationService...");
-        // TODO: let liquidation_service = LiquidationService::new();
+        let liquidation_service: LiquidationService<T> =
+            LiquidationService::new(stop.clone(), cache.clone(), comms_client)?;
 
         Ok(ServiceManager {
             stop,
             stats_interval_sec: config.stats_interval_sec,
-            comms_client,
             cache,
             geyser_subscriber: Arc::new(geyser_subscriber),
             geyser_processor: Arc::new(geyser_processor),
+            liquidation_service: Arc::new(liquidation_service),
         })
     }
 
@@ -82,7 +82,13 @@ impl<T: CommsClient> ServiceManager<T> {
             }
         });
 
-        // TODO: Start the LiquidationService
+        let liquidation_service = self.liquidation_service.clone();
+        thread::spawn(move || {
+            if let Err(e) = liquidation_service.run() {
+                error!("LiquidationService failed! {:?}", e);
+                panic!("Fatal error in LiquidationService!");
+            }
+        });
 
         info!("Entering the Main loop.");
         while !self.stop.load(std::sync::atomic::Ordering::SeqCst) {

@@ -14,11 +14,12 @@ use crate::cache::CacheEntry;
 pub struct CachedBank {
     pub slot: u64,
     pub address: Pubkey,
-    pub mint: Pubkey,
-    pub mint_decimals: u8,
-    pub group: Pubkey,
-    pub oracle_type: OracleSetup,
-    pub oracle_accounts: Vec<Pubkey>,
+    pub _mint: Pubkey,
+    pub _mint_decimals: u8,
+    pub _group: Pubkey,
+    pub _oracle_type: OracleSetup,
+    pub _oracle_accounts: Vec<Pubkey>,
+    // TODO: add pub asset_tag: ???,
     //emode config
 }
 
@@ -37,11 +38,11 @@ impl CachedBank {
         Self {
             slot,
             address,
-            mint: bank.mint,
-            mint_decimals: bank.mint_decimals,
-            group: bank.group,
-            oracle_type: bank.config.oracle_setup,
-            oracle_accounts: get_oracle_accounts(&bank.config),
+            _mint: bank.mint,
+            _mint_decimals: bank.mint_decimals,
+            _group: bank.group,
+            _oracle_type: bank.config.oracle_setup,
+            _oracle_accounts: get_oracle_accounts(&bank.config),
         }
     }
 }
@@ -108,11 +109,11 @@ mod tests {
 
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.mint, bank.mint);
-        assert_eq!(cached.mint_decimals, bank.mint_decimals);
-        assert_eq!(cached.group, bank.group);
-        assert_eq!(cached.oracle_type, bank.config.oracle_setup);
-        assert_eq!(cached.oracle_accounts, vec![oracle1, oracle2]);
+        assert_eq!(cached._mint, bank.mint);
+        assert_eq!(cached._mint_decimals, bank.mint_decimals);
+        assert_eq!(cached._group, bank.group);
+        assert_eq!(cached._oracle_type, bank.config.oracle_setup);
+        assert_eq!(cached._oracle_accounts, vec![oracle1, oracle2]);
     }
 
     #[test]

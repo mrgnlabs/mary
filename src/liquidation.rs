@@ -1,17 +1,30 @@
 mod basic_liquidation_strategy;
 use basic_liquidation_strategy::BasicLiquidationStrategy;
+use std::sync::Arc;
 
-//TODO: totally in draft! Sketched the enum and trait for an inspiration
+use crate::{
+    cache::{marginfi_accounts::CachedMarginfiAccount, Cache},
+    comms::CommsClient,
+};
 
-pub enum LiqudationStrategyType {
-    Basic(BasicLiquidationStrategy),
-    Kamino,
-    Arena,
+pub trait LiquidationStrategy {
+    fn prepare(&self, account: &CachedMarginfiAccount)
+        -> anyhow::Result<Option<LiquidationParams>>;
+    fn liquidate<T: CommsClient>(
+        &self,
+        liquidation_params: LiquidationParams,
+        comms_client: &T,
+    ) -> anyhow::Result<()>;
 }
 
-pub trait LiqudationStrategy {
-    // fn evaluate(&self, account: Account) -> anyhow::Result<LiqudationParams>;
-    // fn liquidate(&self, liquidation_params: LiquidationParams, comms_client: & CommsClient) -> anyhow::Result<LiqudationResult>;
-}
+#[derive(Debug)]
+pub struct LiquidationParams {}
 
-// TODO: fn choose_liquidation_strategy_type(account: Account, cache: &Arc<Cache>) -> impl LiqudationStrategy
+// TODO: create static reusable strategy objects instead of initializing them each time
+pub fn choose_liquidation_strategy(
+    _account: &CachedMarginfiAccount,
+    _cache: &Arc<Cache>,
+) -> anyhow::Result<impl LiquidationStrategy> {
+    // For now, we'll just use the basic strategy
+    Ok(BasicLiquidationStrategy {})
+}
