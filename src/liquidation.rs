@@ -8,22 +8,17 @@ use crate::{
 };
 
 pub trait LiquidationStrategy {
-    fn evaluate(
-        &self,
-        account: &CachedMarginfiAccount,
-    ) -> anyhow::Result<Option<LiquidationParams>>;
+    fn prepare(&self, account: &CachedMarginfiAccount)
+        -> anyhow::Result<Option<LiquidationParams>>;
     fn liquidate<T: CommsClient>(
         &self,
         liquidation_params: LiquidationParams,
         comms_client: &T,
-    ) -> anyhow::Result<LiquidationResult>;
+    ) -> anyhow::Result<()>;
 }
 
 #[derive(Debug)]
 pub struct LiquidationParams {}
-
-#[derive(Debug)]
-pub struct LiquidationResult {}
 
 // TODO: create static reusable strategy objects instead of initializing them each time
 pub fn choose_liquidation_strategy(

@@ -58,7 +58,8 @@ fn main() -> anyhow::Result<()> {
     let config = Config::new()?;
     info!("Configuration: {:?}", config);
 
-    let service_manager = ServiceManager::<RpcCommsClient>::new(config, stop.clone())?;
+    let service_manager: ServiceManager<RpcCommsClient> =
+        ServiceManager::<RpcCommsClient>::new(config, stop.clone())?;
     service_manager.start()?;
 
     Ok(())

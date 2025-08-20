@@ -58,7 +58,7 @@ impl<T: CommsClient> LiquidationService<T> {
             };
             info!("Liquidation cycle is completed.");
             // Temporary hack to avoid busy spin
-            std::thread::sleep(std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_secs(5));
         }
 
         info!("The LiquidationService loop is stopped.");
@@ -68,7 +68,7 @@ impl<T: CommsClient> LiquidationService<T> {
     fn process_account(&self, address: Pubkey) -> Result<()> {
         let account = self.cache.marginfi_accounts.get_account(&address)?;
         let liquidation_strategy = choose_liquidation_strategy(&account, &self.cache)?;
-        if let Some(lq_params) = liquidation_strategy.evaluate(&account)? {
+        if let Some(lq_params) = liquidation_strategy.prepare(&account)? {
             liquidation_strategy.liquidate(lq_params, &self.comms_client)?;
         }
         Ok(())

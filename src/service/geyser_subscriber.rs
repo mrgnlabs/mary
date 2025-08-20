@@ -34,7 +34,7 @@ pub enum GeyserMessageType {
     ClockUpdate,
     MarginfiAccountUpdate,
     MarginfiBankUpdate,
-    OracleUpdate,
+    _OracleUpdate,
 }
 #[derive(Debug)]
 pub struct GeyserMessage {

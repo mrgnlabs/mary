@@ -31,7 +31,7 @@ pub struct CachedMarginfiAccount {
     slot: u64,
     address: Pubkey,
     pub group: Pubkey,
-    pub health: u64,
+    pub health: u64, // account.health_cache.asset_value_maint - liab_value_maint cast to max hashmap max size
     pub positions: Vec<CachedPosition>,
 }
 
@@ -60,7 +60,7 @@ impl CachedMarginfiAccount {
             address,
             group: marginfi_account.group,
             health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
-            positions,
+            positions: positions,
         }
     }
 }
