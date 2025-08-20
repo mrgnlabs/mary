@@ -1,5 +1,5 @@
 mod banks;
-mod marginfi_accounts;
+pub mod marginfi_accounts;
 
 use std::sync::RwLock;
 

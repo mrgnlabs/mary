@@ -111,7 +111,7 @@ impl GeyserSubscriber {
             .enable_all()
             .build()?;
 
-        Ok(GeyserSubscriber {
+        Ok(Self {
             endpoint: config.geyser_endpoint.clone(),
             x_token: config.geyser_x_token.clone(),
             stop,

@@ -4,7 +4,6 @@ use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
-// TODO: need better name!
 pub struct RpcCommsClient {
     solana_rpc_client: RpcClient,
 }

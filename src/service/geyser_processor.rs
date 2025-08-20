@@ -27,7 +27,7 @@ impl GeyserProcessor {
         cache: Arc<Cache>,
         geyser_rx: Receiver<GeyserMessage>,
     ) -> Self {
-        GeyserProcessor {
+        Self {
             stop,
             cache,
             geyser_rx,
