@@ -10,11 +10,7 @@ pub struct CachedMint {
     pub _owner: Pubkey,
 }
 
-impl CacheEntry for CachedMint {
-    fn address(&self) -> Pubkey {
-        self.address
-    }
-}
+impl CacheEntry for CachedMint {}
 
 #[derive(Default)]
 pub struct MintsCache {
@@ -93,4 +89,3 @@ mod tests {
         assert_eq!(cached._owner, owner2);
     }
 }
-

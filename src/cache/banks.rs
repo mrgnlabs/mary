@@ -23,11 +23,7 @@ pub struct CachedBank {
     //emode config
 }
 
-impl CacheEntry for CachedBank {
-    fn address(&self) -> Pubkey {
-        self.address
-    }
-}
+impl CacheEntry for CachedBank {}
 
 impl CachedBank {
     pub fn from(slot: u64, address: Pubkey, bank: &Bank) -> Self {
@@ -147,7 +143,7 @@ mod tests {
         let cached = CachedBank::from(slot, address, &bank);
 
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached.address(), address);
+        assert_eq!(cached.address, address);
     }
 
     #[test]

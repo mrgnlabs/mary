@@ -21,9 +21,7 @@ use crate::{
 };
 
 // TODO: not completely sure that this trait is really needed.
-pub trait CacheEntry {
-    fn address(&self) -> Pubkey;
-}
+pub trait CacheEntry {}
 
 pub struct Cache {
     pub clock: RwLock<Clock>,

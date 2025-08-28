@@ -35,11 +35,7 @@ pub struct CachedMarginfiAccount {
     pub positions: Vec<CachedPosition>,
 }
 
-impl CacheEntry for CachedMarginfiAccount {
-    fn address(&self) -> Pubkey {
-        self.address
-    }
-}
+impl CacheEntry for CachedMarginfiAccount {}
 
 impl CachedMarginfiAccount {
     pub fn from(slot: u64, address: Pubkey, marginfi_account: &MarginfiAccount) -> Self {
