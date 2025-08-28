@@ -7,6 +7,7 @@ use std::{
     },
 };
 
+use crate::common::{get_marginfi_message_type, MessageType};
 use crate::{cache::Cache, config::Config};
 use anyhow::{anyhow, Result};
 use crossbeam::channel::Sender;
@@ -23,22 +24,9 @@ use yellowstone_grpc_proto::{geyser::SubscribeRequestFilterAccounts, prelude::Su
 
 const SOLANA_CLOCK_BYTES: [u8; 32] = sysvar::clock::id().to_bytes();
 
-const MARGINFI_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
-const MARGINFI_ACCOUNT_DISCRIMINATOR_LEN: usize = MARGINFI_ACCOUNT_DISCRIMINATOR.len();
-const MARGINFI_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const MARGINFI_BANK_DISCRIMINATOR_LEN: usize = MARGINFI_BANK_DISCRIMINATOR.len();
-
-// TODO: Is there better home for Geysermessage and GeyserMessageType?
-#[derive(Debug, PartialEq)]
-pub enum GeyserMessageType {
-    ClockUpdate,
-    MarginfiAccountUpdate,
-    MarginfiBankUpdate,
-    _OracleUpdate,
-}
 #[derive(Debug)]
 pub struct GeyserMessage {
-    pub(crate) message_type: GeyserMessageType,
+    pub(crate) message_type: MessageType,
     pub(crate) slot: u64,
     pub(crate) address: Pubkey,
     pub(crate) account: Account,
@@ -46,7 +34,7 @@ pub struct GeyserMessage {
 
 impl GeyserMessage {
     pub fn new(
-        message_type: GeyserMessageType,
+        message_type: MessageType,
         slot: u64,
         geyser_update_account: SubscribeUpdateAccountInfo,
     ) -> Result<Self> {
@@ -215,7 +203,7 @@ fn handle_event(
                 } else if account.pubkey == SOLANA_CLOCK_BYTES {
                     trace!("Handling Solana clock update: {:?}", event);
                     let msg = GeyserMessage::new(
-                        GeyserMessageType::ClockUpdate,
+                        MessageType::Clock,
                         subscribe_account.slot,
                         account.clone(),
                     )?;
@@ -231,31 +219,14 @@ fn handle_event(
     Ok(())
 }
 
-fn get_marginfi_message_type(account_data: &[u8]) -> Option<GeyserMessageType> {
-    if account_data.len() > MARGINFI_ACCOUNT_DISCRIMINATOR_LEN
-        && account_data.starts_with(&MARGINFI_ACCOUNT_DISCRIMINATOR)
-    {
-        Some(GeyserMessageType::MarginfiAccountUpdate)
-    } else if account_data.len() > MARGINFI_BANK_DISCRIMINATOR_LEN
-        && account_data.starts_with(&MARGINFI_BANK_DISCRIMINATOR)
-    {
-        Some(GeyserMessageType::MarginfiBankUpdate)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crossbeam::channel;
-    use marginfi::state::marginfi_group::Bank;
     use yellowstone_grpc_proto::geyser::SubscribeUpdateAccount;
 
     use crate::cache::test_util::generate_test_clock;
 
     use super::*;
-    use anchor_lang::Discriminator;
-    use marginfi::state::marginfi_account::MarginfiAccount;
 
     static MARGINFI_PROGRAM_ID_BYTES: [u8; 32] = [1u8; 32];
 
@@ -295,7 +266,7 @@ mod tests {
 
         // Should have sent a message
         let msg = rx.try_recv().expect("Should have received a message");
-        assert!(matches!(msg.message_type, GeyserMessageType::ClockUpdate));
+        assert!(matches!(msg.message_type, MessageType::Clock));
         assert_eq!(msg.slot, 10);
         assert_eq!(msg.address, sysvar::clock::id());
         assert_eq!(msg.account.lamports, 42);
@@ -387,46 +358,5 @@ mod tests {
 
         // Should NOT have sent a message
         assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn print_discriminators() {
-        println!("MarginfiAccount: {:?}", MarginfiAccount::DISCRIMINATOR);
-        println!("Marginfi Bank {:?}", Bank::DISCRIMINATOR);
-    }
-
-    #[test]
-    fn test_get_marginfi_message_type_account_update() {
-        // Data starts with MARGINFI_ACCOUNT_DISCRIMINATOR and is longer than discriminator
-        let mut data = MARGINFI_ACCOUNT_DISCRIMINATOR.to_vec();
-        data.extend_from_slice(&[0, 1, 2, 3]);
-        let result = get_marginfi_message_type(&data);
-        assert_eq!(result, Some(GeyserMessageType::MarginfiAccountUpdate));
-    }
-
-    #[test]
-    fn test_get_marginfi_message_type_bank_update() {
-        // Data starts with MARGINFI_BANK_DISCRIMINATOR and is longer than discriminator
-        let mut data = MARGINFI_BANK_DISCRIMINATOR.to_vec();
-        data.extend_from_slice(&[4, 5, 6, 7]);
-        let result = get_marginfi_message_type(&data);
-        assert_eq!(result, Some(GeyserMessageType::MarginfiBankUpdate));
-    }
-
-    #[test]
-    fn test_get_marginfi_message_type_too_short() {
-        // Data is shorter than both discriminators
-        let data = vec![1, 2, 3];
-        let result = get_marginfi_message_type(&data);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_get_marginfi_message_type_wrong_discriminator() {
-        // Data does not start with any known discriminator
-        let mut data = vec![9, 9, 9, 9, 9, 9, 9, 9];
-        data.extend_from_slice(&[0, 1, 2, 3]);
-        let result = get_marginfi_message_type(&data);
-        assert_eq!(result, None);
     }
 }

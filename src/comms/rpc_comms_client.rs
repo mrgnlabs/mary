@@ -19,4 +19,10 @@ impl CommsClient for RpcCommsClient {
             .get_account(pubkey)
             .map_err(|e| anyhow!("Failed to get account {}: {}", pubkey, e))
     }
+
+    fn get_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+        self.solana_rpc_client
+            .get_program_accounts(program_id)
+            .map_err(|e| anyhow!("Failed to get accounts for program{}: {}", program_id, e))
+    }
 }

@@ -14,6 +14,8 @@ pub trait CommsClient: Send + Sync {
         Self: Sized;
 
     fn get_account(&self, pubkey: &Pubkey) -> Result<Account>;
+
+    fn get_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
 }
 
 #[cfg(test)]
@@ -45,6 +47,15 @@ pub mod test_util {
                 .get(pubkey)
                 .cloned()
                 .ok_or_else(|| anyhow!("Account not found"))
+        }
+
+        fn get_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+            Ok(self
+                .accounts
+                .iter()
+                .filter(|(&pubkey, _)| pubkey == *program_id)
+                .map(|(pubkey, account)| (pubkey.clone(), account.clone()))
+                .collect())
         }
     }
 }

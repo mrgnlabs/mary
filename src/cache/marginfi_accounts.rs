@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::{anyhow, Result};
 use fixed::types::I80F48;
-use log::debug;
+use log::trace;
 use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
@@ -60,7 +60,7 @@ impl CachedMarginfiAccount {
             address,
             group: marginfi_account.group,
             health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
-            positions: positions,
+            positions,
         }
     }
 }
@@ -73,30 +73,33 @@ pub struct MarginfiAccountsCache {
 
 impl MarginfiAccountsCache {
     pub fn update(&self, slot: u64, address: Pubkey, account: &MarginfiAccount) -> Result<()> {
-        let cached_account = CachedMarginfiAccount::from(slot, address, account);
-        debug!("Updating Marginfi account in cache: {:?}", cached_account);
+        let upd_cached_account = CachedMarginfiAccount::from(slot, address, account);
+        let upd_cached_account_health = upd_cached_account.health;
 
-        let account_health = cached_account.health;
+        let mut accounts = self.accounts.write().map_err(|e| {
+            anyhow!(
+                "Failed to lock the Marginfi accounts cache for update! {}",
+                e
+            )
+        })?;
+        let mut health = self.account_to_health.write().map_err(|e| {
+            anyhow!(
+                "Failed to lock the Marginfi account health cache for update! {}",
+                e
+            )
+        })?;
 
-        self.accounts
-            .write()
-            .map_err(|e| {
-                anyhow!(
-                    "Failed to lock the Marginfi accounts cache for update! {}",
-                    e
-                )
-            })?
-            .insert(address, cached_account);
-
-        self.account_to_health
-            .write()
-            .map_err(|e| {
-                anyhow!(
-                    "Failed to lock the Marginfi account health cache for update! {}",
-                    e
-                )
-            })?
-            .insert(address, account_health);
+        if accounts
+            .get(&address)
+            .map_or(true, |existing| existing.slot < upd_cached_account.slot)
+        {
+            trace!(
+                "Updating Marginfi account in cache: {:?}",
+                upd_cached_account
+            );
+            accounts.insert(address, upd_cached_account);
+            health.insert(address, upd_cached_account_health);
+        }
 
         Ok(())
     }
@@ -236,6 +239,10 @@ mod tests {
         assert_eq!(cached.positions.len(), 2);
         assert_eq!(cached.positions[0].bank, bank1);
         assert_eq!(cached.positions[1].bank, bank2);
+        assert_eq!(cached.positions[0].asset_shares, I80F48::from_num(100));
+        assert_eq!(cached.positions[0].liability_shares, I80F48::from_num(50));
+        assert_eq!(cached.positions[1].asset_shares, I80F48::from_num(200));
+        assert_eq!(cached.positions[1].liability_shares, I80F48::from_num(75));
     }
 
     #[test]
@@ -252,13 +259,17 @@ mod tests {
             .update(slot, address, &marginfi_account)
             .expect("update should succeed");
 
-        let accounts = cache.accounts.read().unwrap();
-        let cached = accounts.get(&address).expect("account should be cached");
+        let cached = cache
+            .get_account(&address)
+            .expect("account should be cached");
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
         assert_eq!(cached.group, group);
         assert_eq!(cached.positions.len(), 1);
         assert_eq!(cached.positions[0].bank, bank);
+
+        let health_map = cache.get_accounts_with_health().unwrap();
+        assert_eq!(health_map.get(&address), Some(&0));
     }
 
     #[test]
@@ -280,10 +291,94 @@ mod tests {
             .update(2, address, &marginfi_account2)
             .expect("second update");
 
-        let accounts = cache.accounts.read().unwrap();
-        let cached = accounts.get(&address).unwrap();
+        let cached = cache.get_account(&address).unwrap();
         assert_eq!(cached.slot, 2);
         assert_eq!(cached.group, group2);
         assert_eq!(cached.positions[0].bank, bank2);
+
+        let health_map = cache.get_accounts_with_health().unwrap();
+        assert_eq!(health_map.get(&address), Some(&0));
+    }
+
+    #[test]
+    fn test_update_with_older_slot_does_not_overwrite() {
+        let cache = MarginfiAccountsCache::default();
+        let address = Pubkey::new_unique();
+        let group_new = Pubkey::new_unique();
+        let group_old = Pubkey::new_unique();
+        let bank_new = Pubkey::new_unique();
+        let bank_old = Pubkey::new_unique();
+
+        let marginfi_account_new =
+            create_marginfi_account(group_new, vec![create_balance(bank_new, 10, 20)]);
+        let marginfi_account_old =
+            create_marginfi_account(group_old, vec![create_balance(bank_old, 30, 40)]);
+
+        // Insert with higher slot first
+        cache
+            .update(10, address, &marginfi_account_new)
+            .expect("first update with new slot");
+
+        // Try to update with lower slot
+        cache
+            .update(5, address, &marginfi_account_old)
+            .expect("second update with old slot");
+
+        let cached = cache.get_account(&address).unwrap();
+        // Should still have the new slot and data
+        assert_eq!(cached.slot, 10);
+        assert_eq!(cached.group, group_new);
+        assert_eq!(cached.positions[0].bank, bank_new);
+        assert_eq!(cached.positions[0].asset_shares, I80F48::from_num(10));
+        assert_eq!(cached.positions[0].liability_shares, I80F48::from_num(20));
+    }
+
+    #[test]
+    fn test_get_account_returns_error_for_missing_account() {
+        let cache = MarginfiAccountsCache::default();
+        let address = Pubkey::new_unique();
+        let result = cache.get_account(&address);
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("not found in cache"));
+    }
+
+    #[test]
+    fn test_get_accounts_with_health_empty() {
+        let cache = MarginfiAccountsCache::default();
+        let health_map = cache.get_accounts_with_health().unwrap();
+        assert!(health_map.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_accounts_in_cache() {
+        let cache = MarginfiAccountsCache::default();
+        let slot1 = 1;
+        let slot2 = 2;
+        let address1 = Pubkey::new_unique();
+        let address2 = Pubkey::new_unique();
+        let group1 = Pubkey::new_unique();
+        let group2 = Pubkey::new_unique();
+        let bank1 = Pubkey::new_unique();
+        let bank2 = Pubkey::new_unique();
+
+        let marginfi_account1 =
+            create_marginfi_account(group1, vec![create_balance(bank1, 11, 22)]);
+        let marginfi_account2 =
+            create_marginfi_account(group2, vec![create_balance(bank2, 33, 44)]);
+
+        cache.update(slot1, address1, &marginfi_account1).unwrap();
+        cache.update(slot2, address2, &marginfi_account2).unwrap();
+
+        let cached1 = cache.get_account(&address1).unwrap();
+        let cached2 = cache.get_account(&address2).unwrap();
+
+        assert_eq!(cached1.slot, slot1);
+        assert_eq!(cached2.slot, slot2);
+        assert_eq!(cached1.positions[0].bank, bank1);
+        assert_eq!(cached2.positions[0].bank, bank2);
+
+        let health_map = cache.get_accounts_with_health().unwrap();
+        assert_eq!(health_map.get(&address1), Some(&0));
+        assert_eq!(health_map.get(&address2), Some(&0));
     }
 }

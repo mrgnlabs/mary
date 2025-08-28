@@ -54,12 +54,21 @@ pub struct BanksCache {
 
 impl BanksCache {
     pub fn update(&self, slot: u64, address: Pubkey, bank: &Bank) -> anyhow::Result<()> {
-        let cached_bank = CachedBank::from(slot, address, bank);
-        debug!("Updating bank in cache: {:?}", cached_bank);
-        self.banks
+        let upd_cached_bank = CachedBank::from(slot, address, bank);
+
+        let mut banks = self
+            .banks
             .write()
-            .map_err(|e| anyhow!("Failed to lock the banks cache for update! {}", e))?
-            .insert(address, cached_bank);
+            .map_err(|e| anyhow!("Failed to lock the banks cache for update! {}", e))?;
+
+        if banks
+            .get(&address)
+            .map_or(true, |existing| existing.slot < upd_cached_bank.slot)
+        {
+            debug!("Updating bank in cache: {:?}", upd_cached_bank);
+            banks.insert(address, upd_cached_bank);
+        }
+
         Ok(())
     }
 }
@@ -69,18 +78,17 @@ fn get_oracle_accounts(bank_config: &BankConfig) -> Vec<Pubkey> {
         .oracle_keys
         .iter()
         .filter(|key| **key != Pubkey::default())
-        .map(|key| *key)
+        .copied()
         .collect()
 }
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod test_util {
     use marginfi::state::marginfi_group::{Bank, BankConfig};
     use marginfi::state::price::OracleSetup;
-    use std::sync::Arc;
-    use std::thread;
+    use solana_sdk::pubkey::Pubkey;
 
-    fn create_bank_with_oracles(oracles: Vec<Pubkey>) -> Bank {
+    pub fn create_bank_with_oracles(oracles: Vec<Pubkey>) -> Bank {
         let mut keys = [Pubkey::default(); 5];
         for (i, key) in oracles.into_iter().take(5).enumerate() {
             keys[i] = key;
@@ -97,6 +105,15 @@ mod tests {
             ..Default::default()
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_util::create_bank_with_oracles;
+    use super::*;
+    use marginfi::state::marginfi_group::BankConfig;
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn test_cached_bank_from() {
@@ -139,6 +156,22 @@ mod tests {
         let cached = banks.get(&address).unwrap();
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
+    }
+
+    #[test]
+    fn test_banks_cache_update_only_newer_slot() {
+        let cache = BanksCache::default();
+        let address = Pubkey::new_unique();
+        let bank1 = create_bank_with_oracles(vec![]);
+        let bank2 = create_bank_with_oracles(vec![]);
+        // Insert with slot 10
+        cache.update(10, address, &bank1).unwrap();
+        // Try to update with older slot (should not update)
+        cache.update(5, address, &bank2).unwrap();
+
+        let banks = cache.banks.read().unwrap();
+        let cached = banks.get(&address).unwrap();
+        assert_eq!(cached.slot, 10);
     }
 
     #[test]

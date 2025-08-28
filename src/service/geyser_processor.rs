@@ -10,10 +10,7 @@ use solana_sdk::{account::Account, clock::Clock};
 // Add the trait import for try_deserialize (adjust if you use a different crate)
 use anchor_lang::AccountDeserialize;
 
-use crate::{
-    cache::Cache,
-    service::geyser_subscriber::{GeyserMessage, GeyserMessageType},
-};
+use crate::{cache::Cache, common::MessageType, service::geyser_subscriber::GeyserMessage};
 
 pub struct GeyserProcessor {
     stop: Arc<AtomicBool>,
@@ -56,13 +53,13 @@ impl GeyserProcessor {
     fn process_message(&self, msg: &GeyserMessage) -> anyhow::Result<()> {
         trace!("Processing Geyser message: {}", msg);
         match msg.message_type {
-            GeyserMessageType::ClockUpdate => {
+            MessageType::Clock => {
                 process_clock_update(&self.cache, &msg.account)?;
             }
-            GeyserMessageType::MarginfiAccountUpdate => {
+            MessageType::MarginfiAccount => {
                 process_marginfi_account_update(&self.cache, msg)?;
             }
-            GeyserMessageType::MarginfiBankUpdate => {
+            MessageType::Bank => {
                 process_marginfi_bank_update(&self.cache, msg)?;
             }
             _ => {
