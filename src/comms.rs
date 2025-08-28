@@ -13,9 +13,11 @@ pub trait CommsClient: Send + Sync {
     where
         Self: Sized;
 
-    fn get_account(&self, pubkey: &Pubkey) -> Result<Account>;
+    fn get_account(&self, address: &Pubkey) -> Result<Account>;
 
-    fn get_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
+    fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
+
+    fn get_accounts(&self, addresses: &Vec<Pubkey>) -> Result<Vec<(Pubkey, Account)>>;
 }
 
 #[cfg(test)]
@@ -49,13 +51,23 @@ pub mod test_util {
                 .ok_or_else(|| anyhow!("Account not found"))
         }
 
-        fn get_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+        fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
             Ok(self
                 .accounts
                 .iter()
                 .filter(|(&pubkey, _)| pubkey == *program_id)
                 .map(|(pubkey, account)| (pubkey.clone(), account.clone()))
                 .collect())
+        }
+
+        fn get_accounts(&self, pubkeys: &Vec<Pubkey>) -> Result<Vec<(Pubkey, Account)>> {
+            let mut accounts = Vec::new();
+            for pubkey in pubkeys {
+                if let Ok(account) = self.get_account(pubkey) {
+                    accounts.push((pubkey.clone(), account));
+                }
+            }
+            Ok(accounts)
         }
     }
 }

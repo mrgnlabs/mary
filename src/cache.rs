@@ -1,6 +1,8 @@
 mod banks;
 pub mod marginfi_accounts;
+mod mints;
 
+use mints::MintsCache;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -20,7 +22,6 @@ use crate::{
 
 // TODO: not completely sure that this trait is really needed.
 pub trait CacheEntry {
-    fn slot(&self) -> u64;
     fn address(&self) -> Pubkey;
 }
 
@@ -28,6 +29,7 @@ pub struct Cache {
     pub clock: RwLock<Clock>,
     pub marginfi_accounts: MarginfiAccountsCache,
     pub banks: BanksCache,
+    pub mints: MintsCache,
 }
 
 impl Cache {
@@ -36,6 +38,7 @@ impl Cache {
             clock: RwLock::new(clock),
             marginfi_accounts: MarginfiAccountsCache::default(),
             banks: BanksCache::default(),
+            mints: MintsCache::default(),
         }
     }
 
@@ -75,11 +78,18 @@ impl<T: CommsClient> CacheLoader<T> {
     }
 
     pub fn load_cache(&self) -> Result<()> {
-        info!("Loading accounts for the program id {}", self.program_id);
+        // Load Marginfi account and banks
+        self.load_accounts()?;
+        self.load_mints()?;
+        Ok(())
+    }
+
+    pub fn load_accounts(&self) -> Result<()> {
+        info!("Loading accounts for the program id {}...", self.program_id);
 
         let slot = self.cache.get_clock()?.slot;
 
-        let accounts = self.comms_client.get_accounts(&self.program_id)?;
+        let accounts = self.comms_client.get_program_accounts(&self.program_id)?;
         let mut marginfi_accounts_count = 0;
         let mut banks_count = 0;
         for (address, account) in accounts {
@@ -108,6 +118,21 @@ impl<T: CommsClient> CacheLoader<T> {
             marginfi_accounts_count, banks_count
         );
 
+        Ok(())
+    }
+
+    pub fn load_mints(&self) -> Result<()> {
+        info!("Loading mints...");
+
+        let mint_addresses = self.cache.banks.get_all_mints()?;
+
+        let mut mints_counter = 0;
+        for (address, mint) in self.comms_client.get_accounts(&mint_addresses)? {
+            self.cache.mints.update(address, &mint)?;
+            mints_counter += 1;
+        }
+
+        info!("Loaded {} mints", mints_counter);
         Ok(())
     }
 }

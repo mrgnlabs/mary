@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use anyhow::anyhow;
-use log::debug;
+use anyhow::{anyhow, Result};
+use log::trace;
 use marginfi::state::{
     marginfi_group::{Bank, BankConfig},
     price::OracleSetup,
@@ -14,7 +14,7 @@ use crate::cache::CacheEntry;
 pub struct CachedBank {
     pub slot: u64,
     pub address: Pubkey,
-    pub _mint: Pubkey,
+    pub mint: Pubkey,
     pub _mint_decimals: u8,
     pub _group: Pubkey,
     pub _oracle_type: OracleSetup,
@@ -24,10 +24,6 @@ pub struct CachedBank {
 }
 
 impl CacheEntry for CachedBank {
-    fn slot(&self) -> u64 {
-        self.slot
-    }
-
     fn address(&self) -> Pubkey {
         self.address
     }
@@ -38,7 +34,7 @@ impl CachedBank {
         Self {
             slot,
             address,
-            _mint: bank.mint,
+            mint: bank.mint,
             _mint_decimals: bank.mint_decimals,
             _group: bank.group,
             _oracle_type: bank.config.oracle_setup,
@@ -53,7 +49,7 @@ pub struct BanksCache {
 }
 
 impl BanksCache {
-    pub fn update(&self, slot: u64, address: Pubkey, bank: &Bank) -> anyhow::Result<()> {
+    pub fn update(&self, slot: u64, address: Pubkey, bank: &Bank) -> Result<()> {
         let upd_cached_bank = CachedBank::from(slot, address, bank);
 
         let mut banks = self
@@ -65,11 +61,21 @@ impl BanksCache {
             .get(&address)
             .map_or(true, |existing| existing.slot < upd_cached_bank.slot)
         {
-            debug!("Updating bank in cache: {:?}", upd_cached_bank);
+            trace!("Updating the Bank in cache: {:?}", upd_cached_bank);
             banks.insert(address, upd_cached_bank);
         }
 
         Ok(())
+    }
+
+    pub fn get_all_mints(&self) -> Result<Vec<Pubkey>> {
+        Ok(self
+            .banks
+            .read()
+            .map_err(|e| anyhow!("Failed to lock the banks cache for reading mints: {}", e))?
+            .values()
+            .map(|bank| bank.mint)
+            .collect())
     }
 }
 
@@ -126,7 +132,7 @@ mod tests {
 
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached._mint, bank.mint);
+        assert_eq!(cached.mint, bank.mint);
         assert_eq!(cached._mint_decimals, bank.mint_decimals);
         assert_eq!(cached._group, bank.group);
         assert_eq!(cached._oracle_type, bank.config.oracle_setup);
@@ -140,7 +146,7 @@ mod tests {
         let bank = create_bank_with_oracles(vec![]);
         let cached = CachedBank::from(slot, address, &bank);
 
-        assert_eq!(cached.slot(), slot);
+        assert_eq!(cached.slot, slot);
         assert_eq!(cached.address(), address);
     }
 
@@ -210,6 +216,52 @@ mod tests {
         }
 
         let result = cache.update(1, address, &bank);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_all_mints_empty() {
+        let cache = BanksCache::default();
+        let mints = cache.get_all_mints().unwrap();
+        assert!(mints.is_empty());
+    }
+
+    #[test]
+    fn test_get_all_mints() {
+        let cache = BanksCache::default();
+
+        let bank1 = create_bank_with_oracles(vec![]);
+        let address1 = Pubkey::new_unique();
+        let mint1 = bank1.mint;
+        cache.update(1, address1, &bank1).unwrap();
+
+        let bank2 = create_bank_with_oracles(vec![]);
+        let address2 = Pubkey::new_unique();
+        let mint2 = bank2.mint;
+        cache.update(2, address2, &bank2).unwrap();
+
+        let mut mints = cache.get_all_mints().unwrap();
+        mints.sort();
+        let mut expected = vec![mint1, mint2];
+        expected.sort();
+        assert_eq!(mints, expected);
+    }
+
+    #[test]
+    fn test_get_all_mints_lock_error() {
+        let cache = Arc::new(BanksCache::default());
+
+        // Poison the lock
+        {
+            let cache2 = Arc::clone(&cache);
+            let _ = thread::spawn(move || {
+                let _lock = cache2.banks.write().unwrap();
+                panic!("Poison the lock");
+            })
+            .join();
+        }
+
+        let result = cache.get_all_mints();
         assert!(result.is_err());
     }
 }

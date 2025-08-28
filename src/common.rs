@@ -10,7 +10,6 @@ pub enum MessageType {
     MarginfiAccount,
     Bank,
     _Oracle,
-    _Mint,
 }
 
 pub fn get_marginfi_message_type(account_data: &[u8]) -> Option<MessageType> {

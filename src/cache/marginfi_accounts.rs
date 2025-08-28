@@ -36,10 +36,6 @@ pub struct CachedMarginfiAccount {
 }
 
 impl CacheEntry for CachedMarginfiAccount {
-    fn slot(&self) -> u64 {
-        self.slot
-    }
-
     fn address(&self) -> Pubkey {
         self.address
     }
@@ -94,7 +90,7 @@ impl MarginfiAccountsCache {
             .map_or(true, |existing| existing.slot < upd_cached_account.slot)
         {
             trace!(
-                "Updating Marginfi account in cache: {:?}",
+                "Updating the Marginfi Account in cache: {:?}",
                 upd_cached_account
             );
             accounts.insert(address, upd_cached_account);
