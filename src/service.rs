@@ -71,6 +71,9 @@ impl<T: CommsClient + 'static> ServiceManager<T> {
     pub fn start(&self) -> anyhow::Result<()> {
         info!("Starting services...");
 
+        info!("Inflating the Cache...");
+        self.cache_loader.load_cache()?;
+
         let geyser_processor = self.geyser_processor.clone();
         thread::spawn(move || {
             if let Err(e) = geyser_processor.run() {
@@ -86,9 +89,6 @@ impl<T: CommsClient + 'static> ServiceManager<T> {
                 panic!("Fatal error in GeyserSubscriber!");
             }
         });
-
-        info!("Inflating the Cache...");
-        self.cache_loader.load_cache()?;
 
         let liquidation_service = self.liquidation_service.clone();
         thread::spawn(move || {

@@ -29,11 +29,11 @@ impl CommsClient for RpcCommsClient {
             .map_err(|e| anyhow!("Failed to get accounts for program{}: {}", program_id, e))
     }
 
-    fn get_accounts(&self, addresses: &Vec<Pubkey>) -> Result<Vec<(Pubkey, Account)>> {
+    fn get_accounts(&self, addresses: &[Pubkey]) -> Result<Vec<(Pubkey, Account)>> {
         let mut tuples: Vec<(Pubkey, Account)> = Vec::new();
 
         for chunk in addresses.chunks(ADDRESSES_CHUNK_SIZE) {
-            let accounts = self.solana_rpc_client.get_multiple_accounts(&chunk)?;
+            let accounts = self.solana_rpc_client.get_multiple_accounts(chunk)?;
             for (address, account_opt) in chunk.iter().zip(accounts.iter()) {
                 if let Some(account) = account_opt {
                     tuples.push((*address, account.clone()));
