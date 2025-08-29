@@ -1,15 +1,21 @@
-mod banks;
+pub mod banks;
 pub mod marginfi_accounts;
+
 mod mints;
+mod oracles;
 
 use mints::MintsCache;
-use std::sync::{Arc, RwLock};
+use oracles::OraclesCache;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use anyhow::{anyhow, Result};
-use log::{info, trace};
+use log::{error, info, trace};
 use marginfi::state::{marginfi_account::MarginfiAccount, marginfi_group::Bank};
 use solana_program::clock::Clock;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::Account, pubkey::Pubkey};
 
 use anchor_lang::AccountDeserialize;
 
@@ -28,6 +34,7 @@ pub struct Cache {
     pub marginfi_accounts: MarginfiAccountsCache,
     pub banks: BanksCache,
     pub mints: MintsCache,
+    pub oracles: OraclesCache,
 }
 
 impl Cache {
@@ -37,6 +44,7 @@ impl Cache {
             marginfi_accounts: MarginfiAccountsCache::default(),
             banks: BanksCache::default(),
             mints: MintsCache::default(),
+            oracles: OraclesCache::default(),
         }
     }
 
@@ -79,11 +87,12 @@ impl<T: CommsClient> CacheLoader<T> {
         // Load Marginfi account and banks
         self.load_accounts()?;
         self.load_mints()?;
+        self.load_oracles()?;
         Ok(())
     }
 
     pub fn load_accounts(&self) -> Result<()> {
-        info!("Loading accounts for the program id {}...", self.program_id);
+        info!("Loading Accounts for the Program id {}...", self.program_id);
 
         let slot = self.cache.get_clock()?.slot;
 
@@ -120,9 +129,9 @@ impl<T: CommsClient> CacheLoader<T> {
     }
 
     pub fn load_mints(&self) -> Result<()> {
-        info!("Loading mints...");
+        info!("Loading Mints...");
 
-        let mint_addresses = self.cache.banks.get_all_mints()?;
+        let mint_addresses = self.cache.banks.get_mints()?;
 
         let mut mints_counter = 0;
         for (address, mint) in self.comms_client.get_accounts(&mint_addresses)? {
@@ -130,7 +139,48 @@ impl<T: CommsClient> CacheLoader<T> {
             mints_counter += 1;
         }
 
-        info!("Loaded {} mints", mints_counter);
+        info!("Loaded {} Mints.", mints_counter);
+        Ok(())
+    }
+
+    pub fn load_oracles(&self) -> Result<()> {
+        info!("Loading Oracles...");
+
+        let slot = self.cache.get_clock()?.slot;
+
+        let oracles_data = self.cache.banks.get_oracles_data()?;
+        let oracle_addresses: Vec<Pubkey> = oracles_data
+            .iter()
+            .flat_map(|oracle: &banks::CachedBankOracle| oracle.oracle_addresses.clone())
+            .collect();
+
+        let oracle_accounts: HashMap<Pubkey, Account> = self
+            .comms_client
+            .get_accounts(&oracle_addresses)?
+            .into_iter()
+            .collect();
+
+        let mut oracle_counter = 0;
+        for oracle_data in oracles_data {
+            for oracle_address in oracle_data.oracle_addresses {
+                match oracle_accounts.get(&oracle_address) {
+                    Some(account) => {
+                        self.cache.oracles.insert(
+                            slot,
+                            oracle_address,
+                            oracle_data.oracle_type,
+                            account.clone(),
+                        )?;
+                        oracle_counter += 1;
+                    }
+                    None => {
+                        error!("Failed to fetch the Oracle account {}", oracle_address);
+                    }
+                }
+            }
+        }
+
+        info!("Loaded {} Oracles.", oracle_counter);
         Ok(())
     }
 }
@@ -141,6 +191,8 @@ pub mod test_util {
 
     use solana_program::clock::Clock;
     use solana_sdk::clock::UnixTimestamp;
+
+    use crate::cache::Cache;
 
     pub fn generate_test_clock(slot: u64) -> Clock {
         let current_timestamp = SystemTime::now()
@@ -156,12 +208,18 @@ pub mod test_util {
             unix_timestamp: current_timestamp,
         }
     }
+
+    pub fn create_dummy_cache() -> Cache {
+        Cache::new(generate_test_clock(1))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::test_util::generate_test_clock;
+    use crate::cache::{banks::test_util::create_bank_with_oracles, test_util::create_dummy_cache};
     use crate::comms::test_util::MockedCommsClient;
+    use solana_sdk::account::Account;
     use solana_sdk::pubkey::Pubkey;
     use std::sync::Arc;
 
@@ -201,7 +259,7 @@ mod tests {
             // add other required fields with dummy values
             ..Default::default()
         };
-        let cache = Arc::new(Cache::new(generate_test_clock(1)));
+        let cache = Arc::new(create_dummy_cache());
 
         // Try to create a CacheLoader using the mocked comms client
         let loader = CacheLoader::<MockedCommsClient>::new(&config, cache.clone());
@@ -211,4 +269,112 @@ mod tests {
     }
 
     //TODO: add the CacheLoader tests after figuring out how to serialize MarginfiAccount.
+
+    #[test]
+    fn test_cache_loader_load_mints() {
+        // Prepare dummy config and cache
+        let config = Config {
+            marginfi_program_id: Pubkey::new_unique(),
+            ..Default::default()
+        };
+        let cache = Arc::new(create_dummy_cache());
+
+        // Insert a dummy bank with a mint address into the cache
+        let mint_pubkey = Pubkey::new_unique();
+        let dummy_bank = create_bank_with_oracles(vec![mint_pubkey]);
+        cache
+            .banks
+            .update(1, Pubkey::new_unique(), &dummy_bank)
+            .unwrap();
+
+        // Prepare a mocked comms client that returns a dummy mint account
+        let pubkey = Pubkey::new_unique();
+        let account = Account {
+            lamports: 1,
+            data: vec![0u8; 82], // dummy mint data
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let mut accounts = HashMap::new();
+        accounts.insert(pubkey, account);
+        let mocked_client = MockedCommsClient::with_accounts(accounts);
+
+        // Create the loader with the mocked client
+        let loader = CacheLoader {
+            program_id: config.marginfi_program_id,
+            comms_client: mocked_client,
+            cache: cache.clone(),
+        };
+
+        // Call load_mints and check that the mint was added to the cache
+        let result = loader.load_mints();
+        assert!(result.is_ok());
+
+        // The mint should now be present in the cache
+        let mints = &cache.mints;
+        assert!(mints.get(&mint_pubkey).is_ok());
+    }
+
+    #[test]
+    fn test_cache_loader_load_oracles() {
+        // Prepare dummy config and cache
+        let config = Config {
+            marginfi_program_id: Pubkey::new_unique(),
+            ..Default::default()
+        };
+        let cache = Arc::new(create_dummy_cache());
+
+        // Create dummy oracle addresses and a dummy CachedBank with oracles
+        let oracle_pubkey1 = Pubkey::new_unique();
+        let oracle_pubkey2 = Pubkey::new_unique();
+        let dummy_bank = create_bank_with_oracles(vec![]);
+        let cached_bank = create_bank_with_oracles(vec![oracle_pubkey1, oracle_pubkey2]);
+
+        cache
+            .banks
+            .update(1, Pubkey::new_unique(), &dummy_bank)
+            .unwrap();
+        cache
+            .banks
+            .update(1, Pubkey::new_unique(), &cached_bank)
+            .unwrap();
+
+        // Prepare dummy oracle accounts
+        let account1 = Account {
+            lamports: 1,
+            data: vec![0u8; 100],
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let account2 = Account {
+            lamports: 2,
+            data: vec![1u8; 100],
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let mut accounts = HashMap::new();
+        accounts.insert(oracle_pubkey1, account1.clone());
+        accounts.insert(oracle_pubkey2, account2.clone());
+
+        let mocked_client = MockedCommsClient::with_accounts(accounts);
+
+        // Create the loader with the mocked client
+        let loader = CacheLoader {
+            program_id: config.marginfi_program_id,
+            comms_client: mocked_client,
+            cache: cache.clone(),
+        };
+
+        // Call load_oracles and check that the oracles were added to the cache
+        let result = loader.load_oracles();
+        assert!(result.is_ok());
+
+        // The oracles should now be present in the cache
+        let oracles_cache = &cache.oracles;
+        assert!(oracles_cache.get(&oracle_pubkey1).is_ok());
+        assert!(oracles_cache.get(&oracle_pubkey2).is_ok());
+    }
 }

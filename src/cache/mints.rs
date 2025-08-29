@@ -4,9 +4,9 @@ use log::trace;
 use solana_sdk::{account::Account, pubkey::Pubkey};
 use std::{collections::HashMap, sync::RwLock};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedMint {
-    pub address: Pubkey,
+    pub _address: Pubkey,
     pub _owner: Pubkey,
 }
 
@@ -20,7 +20,7 @@ pub struct MintsCache {
 impl MintsCache {
     pub fn update(&self, address: Pubkey, mint: &Account) -> Result<()> {
         let upd_cached_mint = CachedMint {
-            address,
+            _address: address,
             _owner: mint.owner,
         };
 
@@ -32,6 +32,15 @@ impl MintsCache {
             .insert(address, upd_cached_mint);
 
         Ok(())
+    }
+
+    pub fn get(&self, address: &Pubkey) -> Result<Option<CachedMint>> {
+        Ok(self
+            .mints
+            .read()
+            .map_err(|e| anyhow!("Failed to lock the Mints cache for read: {}", e))?
+            .get(address)
+            .cloned())
     }
 }
 #[cfg(test)]
@@ -55,7 +64,7 @@ mod tests {
 
         let mints = cache.mints.read().unwrap();
         let cached = mints.get(&address).unwrap();
-        assert_eq!(cached.address, address);
+        assert_eq!(cached._address, address);
         assert_eq!(cached._owner, owner);
     }
 
@@ -87,5 +96,34 @@ mod tests {
         let mints = cache.mints.read().unwrap();
         let cached = mints.get(&address).unwrap();
         assert_eq!(cached._owner, owner2);
+    }
+
+    #[test]
+    fn test_get_returns_none_for_missing_mint() {
+        let cache = MintsCache::default();
+        let address = Pubkey::new_unique();
+        let result = cache.get(&address).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_returns_some_for_existing_mint() {
+        let cache = MintsCache::default();
+        let address = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let account = Account {
+            lamports: 0,
+            data: vec![],
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        cache.update(address, &account).unwrap();
+        let result = cache.get(&address).unwrap();
+        assert!(result.is_some());
+        let cached = result.unwrap();
+        assert_eq!(cached._address, address);
+        assert_eq!(cached._owner, owner);
     }
 }
