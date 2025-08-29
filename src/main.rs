@@ -1,4 +1,5 @@
 mod cache;
+mod common;
 mod comms;
 mod config;
 mod liquidation;
@@ -6,7 +7,6 @@ mod service;
 
 use crate::comms::RpcCommsClient;
 use crate::{config::Config, service::ServiceManager};
-use ctrlc;
 use env_logger::Builder;
 use log::info;
 use signal_hook::consts::{SIGINT, SIGTERM};

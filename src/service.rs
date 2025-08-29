@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    cache::Cache,
+    cache::{Cache, CacheLoader},
     service::geyser_subscriber::{GeyserMessage, GeyserSubscriber},
 };
 use crate::{comms::CommsClient, service::geyser_processor::GeyserProcessor};
@@ -23,6 +23,7 @@ pub struct ServiceManager<T: CommsClient + 'static> {
     stop: Arc<AtomicBool>,
     stats_interval_sec: u64,
     cache: Arc<Cache>,
+    cache_loader: CacheLoader<T>,
     geyser_subscriber: Arc<GeyserSubscriber>,
     geyser_processor: Arc<GeyserProcessor>,
     liquidation_service: Arc<LiquidationService<T>>,
@@ -38,6 +39,9 @@ impl<T: CommsClient + 'static> ServiceManager<T> {
         // Init cache
         info!("Initializing the Cache...");
         let cache = Arc::new(Cache::new(clock));
+
+        info!("Initializing the CacheLoader...");
+        let cache_loader = CacheLoader::new(&config, cache.clone())?;
 
         // Init Geyser services
         let (geyser_tx, geyser_rx) = crossbeam::channel::unbounded::<GeyserMessage>();
@@ -57,6 +61,7 @@ impl<T: CommsClient + 'static> ServiceManager<T> {
             stop,
             stats_interval_sec: config.stats_interval_sec,
             cache,
+            cache_loader,
             geyser_subscriber: Arc::new(geyser_subscriber),
             geyser_processor: Arc::new(geyser_processor),
             liquidation_service: Arc::new(liquidation_service),
@@ -81,6 +86,9 @@ impl<T: CommsClient + 'static> ServiceManager<T> {
                 panic!("Fatal error in GeyserSubscriber!");
             }
         });
+
+        info!("Inflating the Cache...");
+        self.cache_loader.load_cache()?;
 
         let liquidation_service = self.liquidation_service.clone();
         thread::spawn(move || {

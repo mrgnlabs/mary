@@ -1,7 +1,7 @@
 use solana_program::pubkey::Pubkey;
 use std::str::FromStr;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Config {
     pub marginfi_program_id: Pubkey,
     pub stats_interval_sec: u64,
