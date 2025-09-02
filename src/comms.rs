@@ -17,7 +17,7 @@ pub trait CommsClient: Send + Sync {
 
     fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
 
-    fn get_accounts(&self, addresses: &Vec<Pubkey>) -> Result<Vec<(Pubkey, Account)>>;
+    fn get_accounts(&self, addresses: &[Pubkey]) -> Result<Vec<(Pubkey, Account)>>;
 }
 
 #[cfg(test)]
@@ -60,7 +60,7 @@ pub mod test_util {
                 .collect())
         }
 
-        fn get_accounts(&self, pubkeys: &Vec<Pubkey>) -> Result<Vec<(Pubkey, Account)>> {
+        fn get_accounts(&self, pubkeys: &[Pubkey]) -> Result<Vec<(Pubkey, Account)>> {
             let mut accounts = Vec::new();
             for pubkey in pubkeys {
                 if let Ok(account) = self.get_account(pubkey) {
