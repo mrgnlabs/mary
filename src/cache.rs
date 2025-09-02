@@ -256,9 +256,10 @@ mod tests {
     use super::test_util::generate_test_clock;
     use crate::cache::{banks::test_util::create_bank_with_oracles, test_util::create_dummy_cache};
     use crate::comms::test_util::MockedCommsClient;
-    use solana_sdk::address_lookup_table::state::AddressLookupTable;
+    use crate::config::test_util::create_dummy_config;
     use solana_sdk::pubkey::Pubkey;
     use solana_sdk::{account::Account, address_lookup_table::state::LookupTableMeta};
+    use solana_sdk::{address_lookup_table::state::AddressLookupTable, signature::Keypair};
     use std::sync::Arc;
 
     use super::*;
@@ -292,11 +293,7 @@ mod tests {
     #[test]
     fn test_cache_loader_new() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            // add other required fields with dummy values
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Try to create a CacheLoader using the mocked comms client
@@ -311,10 +308,7 @@ mod tests {
     #[test]
     fn test_cache_loader_load_mints() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Insert a dummy bank with a mint address into the cache
@@ -358,10 +352,7 @@ mod tests {
     #[test]
     fn test_cache_loader_load_oracles() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Create dummy oracle addresses and a dummy CachedBank with oracles
@@ -420,13 +411,10 @@ mod tests {
 
     #[test]
     fn test_cache_loader_load_luts() {
+        let mut config = create_dummy_config();
         // Prepare dummy config and cache
         let lut_address = Pubkey::new_unique();
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            lut_addresses: vec![lut_address],
-            ..Default::default()
-        };
+        config.lut_addresses.push(lut_address);
         let cache = Arc::new(create_dummy_cache());
 
         // Create dummy LUT data

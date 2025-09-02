@@ -1,8 +1,9 @@
 use solana_program::pubkey::Pubkey;
+use solana_sdk::{signature::Keypair, signer::Signer};
 use std::str::FromStr;
 
-#[derive(Debug, Default)]
 pub struct Config {
+    pub wallet: Keypair,
     pub marginfi_program_id: Pubkey,
     pub lut_addresses: Vec<Pubkey>,
     pub stats_interval_sec: u64,
@@ -13,6 +14,12 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> anyhow::Result<Self> {
+        let wallet_str = std::env::var("WALLET").expect("WALLET environment variable is not set");
+        let wallet_bytes: Vec<u8> = serde_json::from_str(&wallet_str)
+            .map_err(|e| anyhow::anyhow!("Invalid WALLET format (JSON): {}", e))?;
+        let wallet = Keypair::from_bytes(&wallet_bytes)
+            .map_err(|e| anyhow::anyhow!("Invalid WALLET format (Keypair bytes): {}", e))?;
+
         let marginfi_program_id = Pubkey::from_str(
             &std::env::var("MARGINFI_PROGRAM_ID")
                 .expect("MARGINFI_PROGRAM_ID environment variable is not set"),
@@ -41,6 +48,7 @@ impl Config {
             .expect("GEYSER_X_TOKEN environment variable is not set");
 
         Ok(Config {
+            wallet,
             marginfi_program_id,
             lut_addresses,
             stats_interval_sec,
@@ -56,17 +64,31 @@ impl std::fmt::Display for Config {
         write!(
             f,
             "Config: \n\
+            - wallet: {} \n\
             - marginfi_program_id: {} \n\
+            - lut_addresses: [{}] \n\
             - stats_interval_sec: {} \n\
             - geyser_endpoint: {}",
-            self.marginfi_program_id, self.stats_interval_sec, self.geyser_endpoint
+            self.wallet.pubkey(),
+            self.marginfi_program_id,
+            self.lut_addresses
+                .iter()
+                .map(|addr| addr.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.stats_interval_sec,
+            self.geyser_endpoint
         )
     }
 }
 
 #[cfg(test)]
-mod test_util {
+pub mod test_util {
     use std::env;
+
+    use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+
+    use crate::config::Config;
 
     pub const TEST_MARGINFI_PROGRAM_ID: &str = "11111111111111111111111111111111";
     pub const TEST_STATS_INTERVAL_SEC: &str = "60";
@@ -75,6 +97,10 @@ mod test_util {
     pub const TEST_GEYSER_X_TOKEN: &str = "dummy_x_token";
 
     pub fn set_test_env() {
+        env::set_var(
+            "WALLET",
+            serde_json::to_string(&Keypair::new().to_bytes().to_vec()).unwrap(),
+        );
         env::set_var("MARGINFI_PROGRAM_ID", TEST_MARGINFI_PROGRAM_ID);
         env::set_var(
             "LUT_ADDRESSES",
@@ -92,6 +118,26 @@ mod test_util {
 
     pub fn remove_env(key: &str) {
         env::remove_var(key);
+    }
+
+    pub fn create_dummy_config() -> Config {
+        let wallet = Keypair::new();
+        let marginfi_program_id = Pubkey::new_unique();
+        let lut_addresses = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+        let stats_interval_sec = 60;
+        let rpc_url = "http://dummy_rpc_url".into();
+        let geyser_endpoint = "http://dummy_geyser_endpoint".into();
+        let geyser_x_token = "dummy_x_token".into();
+
+        Config {
+            wallet,
+            marginfi_program_id,
+            lut_addresses,
+            stats_interval_sec,
+            rpc_url,
+            geyser_endpoint,
+            geyser_x_token,
+        }
     }
 }
 
