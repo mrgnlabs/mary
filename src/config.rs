@@ -4,6 +4,7 @@ use std::str::FromStr;
 #[derive(Debug, Default)]
 pub struct Config {
     pub marginfi_program_id: Pubkey,
+    pub lut_addresses: Vec<Pubkey>,
     pub stats_interval_sec: u64,
     pub rpc_url: String,
     pub geyser_endpoint: String,
@@ -17,6 +18,15 @@ impl Config {
                 .expect("MARGINFI_PROGRAM_ID environment variable is not set"),
         )
         .expect("Invalid MARGINFI_PROGRAM_ID Pubkey");
+
+        let lut_addresses: Vec<Pubkey> = std::env::var("LUT_ADDRESSES")
+            .expect("LUT_ADDRESSES environment variable is not set")
+            .split(',')
+            .map(|s| {
+                Pubkey::from_str(s.trim())
+                    .map_err(|_| anyhow::anyhow!("Invalid LUT_ADDRESSES Pubkey: {}", s.trim()))
+            })
+            .collect::<Result<_, _>>()?;
 
         let stats_interval_sec = std::env::var("STATS_INTERVAL_SEC")
             .expect("STATS_INTERVAL_SEC environment variable is not set")
@@ -32,6 +42,7 @@ impl Config {
 
         Ok(Config {
             marginfi_program_id,
+            lut_addresses,
             stats_interval_sec,
             rpc_url,
             geyser_endpoint,
@@ -65,6 +76,14 @@ mod test_util {
 
     pub fn set_test_env() {
         env::set_var("MARGINFI_PROGRAM_ID", TEST_MARGINFI_PROGRAM_ID);
+        env::set_var(
+            "LUT_ADDRESSES",
+            &format!(
+                "{},{}",
+                solana_program::pubkey::Pubkey::new_unique(),
+                solana_program::pubkey::Pubkey::new_unique()
+            ),
+        );
         env::set_var("STATS_INTERVAL_SEC", TEST_STATS_INTERVAL_SEC);
         env::set_var("RPC_URL", TEST_RPC_URL);
         env::set_var("GEYSER_ENDPOINT", TEST_GEYSER_ENDPOINT);
@@ -175,5 +194,59 @@ mod tests {
             "stats_interval_sec: {}",
             super::test_util::TEST_STATS_INTERVAL_SEC
         )));
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_lut_addresses_parsing() {
+        super::test_util::set_test_env();
+
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // Set LUT_ADDRESSES to two valid pubkeys
+        let lut_addresses = format!("{},{}", pk1, pk2);
+        std::env::set_var("LUT_ADDRESSES", lut_addresses);
+
+        let config = Config::new().unwrap();
+        assert_eq!(config.lut_addresses.len(), 2);
+        assert_eq!(config.lut_addresses[0].to_string(), pk1.to_string());
+        assert_eq!(config.lut_addresses[1].to_string(), pk2.to_string());
+    }
+
+    #[test]
+    #[serial]
+    #[should_panic(expected = "Invalid LUT_ADDRESSES Pubkey:")]
+    fn test_config_lut_addresses_empty() {
+        super::test_util::set_test_env();
+        std::env::set_var("LUT_ADDRESSES", "");
+        let _ = Config::new().unwrap();
+    }
+
+    #[test]
+    #[serial]
+    #[should_panic(expected = "LUT_ADDRESSES environment variable is not set")]
+    fn test_config_missing_lut_addresses() {
+        super::test_util::set_test_env();
+        super::test_util::remove_env("LUT_ADDRESSES");
+        let _ = Config::new();
+    }
+
+    #[test]
+    #[serial]
+    #[should_panic(expected = "Invalid LUT_ADDRESSES Pubkey:")]
+    fn test_config_lut_addresses_with_invalid_pubkey() {
+        super::test_util::set_test_env();
+        // One valid, one invalid pubkey
+        std::env::set_var(
+            "LUT_ADDRESSES",
+            "11111111111111111111111111111111,invalid_pubkey",
+        );
+        let config = Config::new().unwrap();
+        // Only the valid pubkey should be parsed
+        assert_eq!(config.lut_addresses.len(), 1);
+        assert_eq!(
+            config.lut_addresses[0].to_string(),
+            "11111111111111111111111111111111"
+        );
     }
 }
