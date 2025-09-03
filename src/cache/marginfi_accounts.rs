@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::RwLock};
 use anyhow::{anyhow, Result};
 use fixed::types::I80F48;
 use log::trace;
-use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
+use marginfi_type_crate::types::{Balance, LendingAccount, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::cache::CacheEntry;
@@ -33,6 +33,8 @@ pub struct CachedMarginfiAccount {
     pub group: Pubkey,
     pub health: u64, // account.health_cache.asset_value_maint - liab_value_maint cast to max hashmap max size
     pub positions: Vec<CachedPosition>,
+    pub liquidation_record: Pubkey,
+    pub lending_account: LendingAccount, // TODO: think about simplification
 }
 
 impl CacheEntry for CachedMarginfiAccount {}
@@ -53,6 +55,8 @@ impl CachedMarginfiAccount {
             group: marginfi_account.group,
             health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
             positions,
+            liquidation_record: Pubkey::default(),
+            lending_account: marginfi_account.lending_account.clone(),
         }
     }
 }
@@ -96,7 +100,7 @@ impl MarginfiAccountsCache {
         Ok(())
     }
 
-    pub fn get_account(&self, address: &Pubkey) -> Result<CachedMarginfiAccount> {
+    pub fn get(&self, address: &Pubkey) -> Result<CachedMarginfiAccount> {
         self.accounts
             .read()
             .map_err(|e| {
@@ -127,11 +131,7 @@ impl MarginfiAccountsCache {
 #[cfg(test)]
 pub mod test_util {
     use super::*;
-    use marginfi::state::{
-        health_cache::HealthCache,
-        marginfi_account::{Balance, LendingAccount, MarginfiAccount},
-        marginfi_group::WrappedI80F48,
-    };
+    use marginfi_type_crate::types::{HealthCache, LendingAccount, WrappedI80F48};
     use solana_sdk::pubkey::Pubkey;
 
     pub fn create_default_balance() -> Balance {
@@ -172,19 +172,21 @@ pub mod test_util {
 
         MarginfiAccount {
             group,
+            authority: Pubkey::default(),
             lending_account: LendingAccount {
                 balances: balances_array,
                 _padding: [0; 8],
             },
             account_flags: 0,
-            migrated_from: Pubkey::default(),
+            emissions_destination_account: Pubkey::default(),
             health_cache: HealthCache {
                 // Fill in the fields with appropriate dummy/test values
                 ..unsafe { std::mem::zeroed() }
             },
-            _padding0: [0; 17],
-            authority: Pubkey::default(),
-            emissions_destination_account: Pubkey::default(),
+            migrated_from: Pubkey::default(),
+            migrated_to: Pubkey::default(),
+            liquidation_record: Pubkey::default(),
+            _padding0: [0; 9],
         }
     }
 }
@@ -252,7 +254,7 @@ mod tests {
             .expect("update should succeed");
 
         let cached = cache
-            .get_account(&address)
+            .get(&address)
             .expect("account should be cached");
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
@@ -283,7 +285,7 @@ mod tests {
             .update(2, address, &marginfi_account2)
             .expect("second update");
 
-        let cached = cache.get_account(&address).unwrap();
+        let cached = cache.get(&address).unwrap();
         assert_eq!(cached.slot, 2);
         assert_eq!(cached.group, group2);
         assert_eq!(cached.positions[0].bank, bank2);
@@ -316,7 +318,7 @@ mod tests {
             .update(5, address, &marginfi_account_old)
             .expect("second update with old slot");
 
-        let cached = cache.get_account(&address).unwrap();
+        let cached = cache.get(&address).unwrap();
         // Should still have the new slot and data
         assert_eq!(cached.slot, 10);
         assert_eq!(cached.group, group_new);
@@ -329,7 +331,7 @@ mod tests {
     fn test_get_account_returns_error_for_missing_account() {
         let cache = MarginfiAccountsCache::default();
         let address = Pubkey::new_unique();
-        let result = cache.get_account(&address);
+        let result = cache.get(&address);
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("not found in cache"));
     }
@@ -361,8 +363,8 @@ mod tests {
         cache.update(slot1, address1, &marginfi_account1).unwrap();
         cache.update(slot2, address2, &marginfi_account2).unwrap();
 
-        let cached1 = cache.get_account(&address1).unwrap();
-        let cached2 = cache.get_account(&address2).unwrap();
+        let cached1 = cache.get(&address1).unwrap();
+        let cached2 = cache.get(&address2).unwrap();
 
         assert_eq!(cached1.slot, slot1);
         assert_eq!(cached2.slot, slot2);

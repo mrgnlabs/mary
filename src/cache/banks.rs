@@ -1,11 +1,8 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::{anyhow, Result};
-use log::trace;
-use marginfi::state::{
-    marginfi_group::{Bank, BankConfig},
-    price::OracleSetup,
-};
+use log::{debug, trace};
+use marginfi_type_crate::types::{Bank, BankConfig, OracleSetup};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::cache::CacheEntry;
@@ -16,7 +13,7 @@ pub struct CachedBankOracle {
     pub oracle_addresses: Vec<Pubkey>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CachedBank {
     pub slot: u64,
     pub _address: Pubkey,
@@ -70,7 +67,7 @@ impl BanksCache {
 
         Ok(())
     }
-
+    
     pub fn get_mints(&self) -> Result<Vec<Pubkey>> {
         Ok(self
             .banks
@@ -81,7 +78,7 @@ impl BanksCache {
             .collect())
     }
 
-    pub fn get_oracles_data(&self) -> Result<Vec<CachedBankOracle>> {
+ pub fn get_oracles_data(&self) -> Result<Vec<CachedBankOracle>> {
         Ok(self
             .banks
             .read()
@@ -94,6 +91,17 @@ impl BanksCache {
             .values()
             .map(|bank| bank.oracle.clone())
             .collect())
+    }
+
+
+    pub fn get(&self, address: &Pubkey) -> anyhow::Result<CachedBank> {
+        debug!("Getting bank from cache: {:?}", address);
+        let cached_bank = self.banks
+            .read()
+            .map_err(|e| anyhow!("Failed to lock the banks cache for getting! {}", e))?
+            .get(address)
+            .ok_or(anyhow!("Failed to get the bank from cache"))?.clone();
+        Ok(cached_bank)
     }
 }
 
@@ -108,8 +116,7 @@ fn get_oracle_accounts(bank_config: &BankConfig) -> Vec<Pubkey> {
 
 #[cfg(test)]
 pub mod test_util {
-    use marginfi::state::marginfi_group::{Bank, BankConfig};
-    use marginfi::state::price::OracleSetup;
+    use marginfi_type_crate::types::{bank::OracleSetup, Bank, BankConfig};
     use solana_sdk::pubkey::Pubkey;
 
     use crate::cache::banks::CachedBank;
@@ -141,7 +148,6 @@ pub mod test_util {
 mod tests {
     use super::test_util::create_bank_with_oracles;
     use super::*;
-    use marginfi::state::marginfi_group::BankConfig;
     use std::sync::Arc;
     use std::thread;
 

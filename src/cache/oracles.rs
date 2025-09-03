@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use marginfi::state::price::OracleSetup;
+use marginfi_type_crate::types::OracleSetup;
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
 use crate::cache::CacheEntry;

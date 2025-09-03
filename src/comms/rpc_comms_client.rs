@@ -1,20 +1,40 @@
-use crate::comms::CommsClient;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use crate::cache::Cache;
+use crate::comms::utils::maybe_add_bank_mint;
+use crate::comms::{utils::find_bank_liquidity_vault_authority, CommsClient};
 use crate::config::Config;
+use anchor_lang::prelude::AccountMeta;
+use anchor_spl::associated_token;
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{account::Account, commitment_config::CommitmentConfig, pubkey::Pubkey};
 
 const ADDRESSES_CHUNK_SIZE: usize = 100;
+use fixed::types::I80F48;
+use solana_client::{rpc_client::RpcClient, rpc_config::RpcSendTransactionConfig};
+use solana_sdk::signature::Keypair;
+use solana_sdk::signer::Signer;
+use solana_sdk::{account::Account, commitment_config::{CommitmentConfig, CommitmentLevel}, compute_budget::ComputeBudgetInstruction, instruction::Instruction, pubkey::Pubkey};
+use anchor_lang::ToAccountMetas;
+use anchor_lang::InstructionData;
 
 pub struct RpcCommsClient {
     solana_rpc_client: RpcClient,
+    cu_limit_ix: Instruction,
+    marginfi_account: Pubkey,
+    signer: Keypair,
 }
 
 impl CommsClient for RpcCommsClient {
     fn new(config: &Config) -> Result<Self> {
         let solana_rpc_client =
             RpcClient::new_with_commitment(&config.rpc_url, CommitmentConfig::confirmed());
-        Ok(RpcCommsClient { solana_rpc_client })
+        let cu_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(200000);
+        let marginfi_account = Pubkey::new_unique(); //config.marginfi_program_id
+        let signer = Keypair::new(); //config.keypair
+        Ok(RpcCommsClient { solana_rpc_client, cu_limit_ix, marginfi_account, signer })
     }
 
     fn get_account(&self, pubkey: &Pubkey) -> Result<Account> {
@@ -42,5 +62,31 @@ impl CommsClient for RpcCommsClient {
         }
 
         Ok(tuples)
+
+    }
+
+    fn send_ix(&self, ix: Instruction) -> Result<()> {
+                let recent_blockhash = self.solana_rpc_client.get_latest_blockhash()?;
+
+        let tx: solana_sdk::transaction::Transaction =
+            solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &[self.cu_limit_ix.clone(), ix],
+                Some(&self.signer.pubkey()),
+                &[&self.signer],
+                recent_blockhash,
+            );
+
+        let _ = self.solana_rpc_client.send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                CommitmentConfig::finalized(),
+                RpcSendTransactionConfig {
+                    skip_preflight: false,
+                    preflight_commitment: Some(CommitmentLevel::Processed),
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(())
     }
 }

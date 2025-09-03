@@ -2379,6 +2379,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-crate"
+version = "0.1.0"
+source = "git+https://github.com/mrgnlabs/marginfi-v2?branch=mary-exports#d0a82bb7894112d456f700ef652105a2753391af"
+dependencies = [
+ "anchor-lang",
+ "cfg-if",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2731,8 +2740,8 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "marginfi"
-version = "0.1.4"
-source = "git+https://github.com/mrgnlabs/marginfi-v2?tag=mrgn-0.1.4-rc1#35b8970ca673bf80d0092ca834f0c1157d6c963e"
+version = "0.1.5"
+source = "git+https://github.com/mrgnlabs/marginfi-v2?branch=mary-exports#d0a82bb7894112d456f700ef652105a2753391af"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -2742,13 +2751,29 @@ dependencies = [
  "enum_dispatch",
  "fixed",
  "fixed-macro",
+ "id-crate",
  "lazy_static",
+ "marginfi-type-crate",
  "pyth-solana-receiver-sdk",
  "solana-security-txt",
  "spl-transfer-hook-interface 0.9.0",
  "static_assertions",
  "switchboard-on-demand",
- "type-layout",
+]
+
+[[package]]
+name = "marginfi-type-crate"
+version = "0.1.5"
+source = "git+https://github.com/mrgnlabs/marginfi-v2?branch=mary-exports#d0a82bb7894112d456f700ef652105a2753391af"
+dependencies = [
+ "anchor-lang",
+ "bs58",
+ "bytemuck",
+ "fixed",
+ "fixed-macro",
+ "id-crate",
+ "solana-instruction",
+ "static_assertions",
 ]
 
 [[package]]
@@ -2756,6 +2781,7 @@ name = "mary"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "anchor-spl",
  "anyhow",
  "bincode",
  "crossbeam",
@@ -2765,6 +2791,7 @@ dependencies = [
  "futures",
  "log",
  "marginfi",
+ "marginfi-type-crate",
  "serde_json",
  "serial_test",
  "signal-hook",
@@ -2796,15 +2823,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83faa42c0a078c393f6b29d5db232d8be22776a891f8f56e5284faee4a20b327"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "memoffset"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "043175f069eda7b85febe4a74abbaeff828d9f8b448515d3151a14a3542811aa"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]
@@ -2886,7 +2904,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset 0.9.1",
+ "memoffset",
 ]
 
 [[package]]
@@ -4899,7 +4917,7 @@ dependencies = [
  "js-sys",
  "lazy_static",
  "log",
- "memoffset 0.9.1",
+ "memoffset",
  "num-bigint 0.4.6",
  "num-derive",
  "num-traits",
@@ -6747,27 +6765,6 @@ dependencies = [
  "url",
  "utf-8",
  "webpki-roots 0.24.0",
-]
-
-[[package]]
-name = "type-layout"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "074069282ba5be5078f1bdb34112b963516d50f262bf4c1082fee1f6ada11d74"
-dependencies = [
- "memoffset 0.5.6",
- "type-layout-derive",
-]
-
-[[package]]
-name = "type-layout-derive"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc4a1cf66ce820973c4b31c5ef47a8e930a53ffbcec191212c33f5a3ad75c6cd"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]

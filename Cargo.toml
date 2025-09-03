@@ -21,12 +21,14 @@ tokio = { version = "1.47.0" }
 futures = "0.3.30"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 anchor-lang = { version = "0.31.1" }
+anchor-spl = { version = "0.31.1", features = ["token_2022"] }
 fixed = "1.28.0"
 serde_json = "1.0.143"
+marginfi_type_crate = { git = "https://github.com/mrgnlabs/marginfi-v2", package = "marginfi-type-crate", branch = "mary-exports" }
 
 [dependencies.marginfi]
 git = "https://github.com/mrgnlabs/marginfi-v2"
-tag = "mrgn-0.1.4-rc1"
+branch = "mary-exports"
 features = ["mainnet-beta", "client", "no-entrypoint"]
 
 [dev-dependencies]

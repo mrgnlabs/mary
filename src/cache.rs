@@ -5,6 +5,7 @@ mod luts;
 mod mints;
 mod oracles;
 
+use marginfi_type_crate::{constants::FEE_STATE_SEED, types::{Bank, MarginfiAccount}};
 use mints::MintsCache;
 use oracles::OraclesCache;
 use std::{
@@ -14,7 +15,6 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use log::{error, info, trace};
-use marginfi::state::{marginfi_account::MarginfiAccount, marginfi_group::Bank};
 use solana_program::clock::Clock;
 use solana_sdk::{
     account::Account,
@@ -41,10 +41,13 @@ pub struct Cache {
     pub mints: MintsCache,
     pub oracles: OraclesCache,
     pub luts: LutsCache,
+    pub global_fee_state_key: Pubkey,
 }
 
 impl Cache {
-    pub fn new(clock: Clock) -> Self {
+    pub fn new(clock: Clock, marginfi_program_id: &Pubkey) -> Self {
+    let (global_fee_state_key, _) =
+            Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], marginfi_program_id);
         Self {
             clock: RwLock::new(clock),
             marginfi_accounts: MarginfiAccountsCache::default(),
@@ -52,6 +55,7 @@ impl Cache {
             mints: MintsCache::default(),
             oracles: OraclesCache::default(),
             luts: LutsCache::default(),
+            global_fee_state_key,
         }
     }
 

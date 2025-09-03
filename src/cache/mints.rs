@@ -7,7 +7,7 @@ use std::{collections::HashMap, sync::RwLock};
 #[derive(Debug, Clone)]
 pub struct CachedMint {
     pub _address: Pubkey,
-    pub _owner: Pubkey,
+    pub owner: Pubkey,
 }
 
 impl CacheEntry for CachedMint {}
@@ -21,7 +21,7 @@ impl MintsCache {
     pub fn update(&self, address: Pubkey, mint: &Account) -> Result<()> {
         let upd_cached_mint = CachedMint {
             _address: address,
-            _owner: mint.owner,
+            owner: mint.owner,
         };
 
         trace!("Updating the Mint in cache: {:?}", upd_cached_mint);
@@ -34,13 +34,13 @@ impl MintsCache {
         Ok(())
     }
 
-    pub fn get(&self, address: &Pubkey) -> Result<Option<CachedMint>> {
-        Ok(self
+    pub fn get(&self, address: &Pubkey) -> Result<CachedMint> {
+        self
             .mints
             .read()
             .map_err(|e| anyhow!("Failed to lock the Mints cache for read: {}", e))?
             .get(address)
-            .cloned())
+            .cloned().ok_or(anyhow!("Failed to get mint from the Mints cache: {}", address))
     }
 }
 #[cfg(test)]
@@ -65,7 +65,7 @@ mod tests {
         let mints = cache.mints.read().unwrap();
         let cached = mints.get(&address).unwrap();
         assert_eq!(cached._address, address);
-        assert_eq!(cached._owner, owner);
+        assert_eq!(cached.owner, owner);
     }
 
     #[test]
@@ -95,15 +95,15 @@ mod tests {
 
         let mints = cache.mints.read().unwrap();
         let cached = mints.get(&address).unwrap();
-        assert_eq!(cached._owner, owner2);
+        assert_eq!(cached.owner, owner2);
     }
 
     #[test]
     fn test_get_returns_none_for_missing_mint() {
         let cache = MintsCache::default();
         let address = Pubkey::new_unique();
-        let result = cache.get(&address).unwrap();
-        assert!(result.is_none());
+        let result = cache.get(&address);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -120,10 +120,10 @@ mod tests {
         };
 
         cache.update(address, &account).unwrap();
-        let result = cache.get(&address).unwrap();
-        assert!(result.is_some());
+        let result = cache.get(&address);
+        assert!(result.is_ok());
         let cached = result.unwrap();
         assert_eq!(cached._address, address);
-        assert_eq!(cached._owner, owner);
+        assert_eq!(cached.owner, owner);
     }
 }

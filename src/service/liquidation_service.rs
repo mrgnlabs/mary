@@ -66,7 +66,7 @@ impl<T: CommsClient> LiquidationService<T> {
     }
 
     fn process_account(&self, address: Pubkey) -> Result<()> {
-        let account = self.cache.marginfi_accounts.get_account(&address)?;
+        let account = self.cache.marginfi_accounts.get(&address)?;
         let liquidation_strategy = choose_liquidation_strategy(&account, &self.cache)?;
         if let Some(lq_params) = liquidation_strategy.prepare(&account)? {
             liquidation_strategy.liquidate(lq_params, &self.comms_client)?;
