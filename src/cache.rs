@@ -215,9 +215,10 @@ impl<T: CommsClient> CacheLoader<T> {
             });
         }
 
-        self.cache.luts.populate(luts.clone())?;
+        let luts_total = luts.len();
+        self.cache.luts.populate(luts)?;
 
-        info!("Loaded {} Luts.", luts.len());
+        info!("Loaded {} Luts.", luts_total);
         Ok(())
     }
 }
