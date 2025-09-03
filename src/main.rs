@@ -56,7 +56,7 @@ fn main() -> anyhow::Result<()> {
     Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let config = Config::new()?;
-    info!("Configuration: {:?}", config);
+    info!("Configuration: {}", config);
 
     let service_manager: ServiceManager<RpcCommsClient> =
         ServiceManager::<RpcCommsClient>::new(config, stop.clone())?;

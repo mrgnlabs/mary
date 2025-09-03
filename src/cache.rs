@@ -1,6 +1,7 @@
 pub mod banks;
 pub mod marginfi_accounts;
 
+mod luts;
 mod mints;
 mod oracles;
 
@@ -15,12 +16,16 @@ use anyhow::{anyhow, Result};
 use log::{error, info, trace};
 use marginfi::state::{marginfi_account::MarginfiAccount, marginfi_group::Bank};
 use solana_program::clock::Clock;
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_sdk::{
+    account::Account,
+    address_lookup_table::{state::AddressLookupTable, AddressLookupTableAccount},
+    pubkey::Pubkey,
+};
 
 use anchor_lang::AccountDeserialize;
 
 use crate::{
-    cache::{banks::BanksCache, marginfi_accounts::MarginfiAccountsCache},
+    cache::{banks::BanksCache, luts::LutsCache, marginfi_accounts::MarginfiAccountsCache},
     common::{get_marginfi_message_type, MessageType},
     comms::CommsClient,
     config::Config,
@@ -35,6 +40,7 @@ pub struct Cache {
     pub banks: BanksCache,
     pub mints: MintsCache,
     pub oracles: OraclesCache,
+    pub luts: LutsCache,
 }
 
 impl Cache {
@@ -45,6 +51,7 @@ impl Cache {
             banks: BanksCache::default(),
             mints: MintsCache::default(),
             oracles: OraclesCache::default(),
+            luts: LutsCache::default(),
         }
     }
 
@@ -69,15 +76,18 @@ impl Cache {
 //TODO: consider moving out to it's own module if it grows larger
 pub struct CacheLoader<T: CommsClient> {
     program_id: Pubkey,
+    lut_addresses: Vec<Pubkey>,
     cache: Arc<Cache>,
     comms_client: T,
 }
 
 impl<T: CommsClient> CacheLoader<T> {
     pub fn new(config: &Config, cache: Arc<Cache>) -> Result<Self> {
+        let lut_addresses = config.lut_addresses.clone();
         let comms_client = T::new(config)?;
         Ok(Self {
             program_id: config.marginfi_program_id,
+            lut_addresses,
             comms_client,
             cache,
         })
@@ -88,6 +98,7 @@ impl<T: CommsClient> CacheLoader<T> {
         self.load_accounts()?;
         self.load_mints()?;
         self.load_oracles()?;
+        self.load_luts()?;
         Ok(())
     }
 
@@ -183,6 +194,32 @@ impl<T: CommsClient> CacheLoader<T> {
         info!("Loaded {} Oracles.", oracle_counter);
         Ok(())
     }
+
+    pub fn load_luts(&self) -> Result<()> {
+        if self.lut_addresses.is_empty() {
+            info!("No LUT addresses provided, skipping LUT loading.");
+            return Ok(());
+        }
+
+        info!("Loading Luts...");
+
+        let lut_accounts = self.comms_client.get_accounts(&self.lut_addresses)?;
+
+        let mut luts: Vec<AddressLookupTableAccount> = Vec::new();
+        for (lut_address, lut_account) in lut_accounts {
+            let lut = AddressLookupTable::deserialize(&lut_account.data)
+                .map_err(|e| anyhow!("Failed to deserialize the {} LUT : {:?}", lut_address, e))?;
+            luts.push(AddressLookupTableAccount {
+                key: lut_address,
+                addresses: lut.addresses.to_vec(),
+            });
+        }
+
+        self.cache.luts.populate(luts.clone())?;
+
+        info!("Loaded {} Luts.", luts.len());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -219,8 +256,10 @@ mod tests {
     use super::test_util::generate_test_clock;
     use crate::cache::{banks::test_util::create_bank_with_oracles, test_util::create_dummy_cache};
     use crate::comms::test_util::MockedCommsClient;
-    use solana_sdk::account::Account;
+    use crate::config::test_util::create_dummy_config;
     use solana_sdk::pubkey::Pubkey;
+    use solana_sdk::{account::Account, address_lookup_table::state::LookupTableMeta};
+    use solana_sdk::{address_lookup_table::state::AddressLookupTable, signature::Keypair};
     use std::sync::Arc;
 
     use super::*;
@@ -254,11 +293,7 @@ mod tests {
     #[test]
     fn test_cache_loader_new() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            // add other required fields with dummy values
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Try to create a CacheLoader using the mocked comms client
@@ -273,10 +308,7 @@ mod tests {
     #[test]
     fn test_cache_loader_load_mints() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Insert a dummy bank with a mint address into the cache
@@ -303,6 +335,7 @@ mod tests {
         // Create the loader with the mocked client
         let loader = CacheLoader {
             program_id: config.marginfi_program_id,
+            lut_addresses: vec![],
             comms_client: mocked_client,
             cache: cache.clone(),
         };
@@ -319,10 +352,7 @@ mod tests {
     #[test]
     fn test_cache_loader_load_oracles() {
         // Prepare dummy config and cache
-        let config = Config {
-            marginfi_program_id: Pubkey::new_unique(),
-            ..Default::default()
-        };
+        let config = create_dummy_config();
         let cache = Arc::new(create_dummy_cache());
 
         // Create dummy oracle addresses and a dummy CachedBank with oracles
@@ -364,6 +394,7 @@ mod tests {
         // Create the loader with the mocked client
         let loader = CacheLoader {
             program_id: config.marginfi_program_id,
+            lut_addresses: vec![],
             comms_client: mocked_client,
             cache: cache.clone(),
         };
@@ -376,5 +407,52 @@ mod tests {
         let oracles_cache = &cache.oracles;
         assert!(oracles_cache.get(&oracle_pubkey1).is_ok());
         assert!(oracles_cache.get(&oracle_pubkey2).is_ok());
+    }
+
+    #[test]
+    fn test_cache_loader_load_luts() {
+        let mut config = create_dummy_config();
+        // Prepare dummy config and cache
+        let lut_address = Pubkey::new_unique();
+        config.lut_addresses.push(lut_address);
+        let cache = Arc::new(create_dummy_cache());
+
+        // Create dummy LUT data
+        let dummy_addresses: Vec<Pubkey> = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+        let lut = AddressLookupTable {
+            meta: LookupTableMeta::default(),
+            addresses: dummy_addresses.clone().try_into().unwrap_or_default(),
+        };
+        let lut_account_data = AddressLookupTable::serialize_for_tests(lut.clone()).unwrap();
+        let lut_account = Account {
+            lamports: 1,
+            data: lut_account_data,
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        let mut accounts = HashMap::new();
+        accounts.insert(lut_address, lut_account);
+
+        let mocked_client = MockedCommsClient::with_accounts(accounts);
+
+        // Create the loader with the mocked client
+        let loader = CacheLoader {
+            program_id: config.marginfi_program_id,
+            lut_addresses: config.lut_addresses.clone(),
+            comms_client: mocked_client,
+            cache: cache.clone(),
+        };
+
+        // Call load_luts and check that the LUTs were added to the cache
+        let result = loader.load_luts();
+        assert!(result.is_ok());
+
+        // The LUT should now be present in the cache
+        let luts_cache = &cache.luts;
+        let luts = luts_cache.get_all().unwrap();
+        assert!(!luts.is_empty());
+        assert!(luts.iter().any(|lut| lut.key == lut_address));
     }
 }
