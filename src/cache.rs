@@ -118,11 +118,13 @@ impl<T: CommsClient> CacheLoader<T> {
                     self.cache
                         .marginfi_accounts
                         .update(slot, address, &marginfi_account)?;
+                    trace!("Added the Marginfi Account {:?} to cache.", address);
                     marginfi_accounts_count += 1;
                 }
                 Some(MessageType::Bank) => {
                     let bank: Bank = Bank::try_deserialize(&mut account.data.as_slice())?;
                     self.cache.banks.update(slot, address, &bank)?;
+                    info!("Added the Bank {:?} to cache.", address);
                     banks_count += 1;
                 }
                 _ => {
@@ -147,6 +149,7 @@ impl<T: CommsClient> CacheLoader<T> {
         let mut mints_counter = 0;
         for (address, mint) in self.comms_client.get_accounts(&mint_addresses)? {
             self.cache.mints.update(address, &mint)?;
+            info!("Added the Mint {:?} to cache.", address);
             mints_counter += 1;
         }
 
@@ -176,13 +179,20 @@ impl<T: CommsClient> CacheLoader<T> {
             for oracle_address in oracle_data.oracle_addresses {
                 match oracle_accounts.get(&oracle_address) {
                     Some(account) => {
-                        self.cache.oracles.insert(
+                        if let Err(err) = self.cache.oracles.insert(
                             slot,
                             oracle_address,
                             oracle_data.oracle_type,
                             account.clone(),
-                        )?;
-                        oracle_counter += 1;
+                        ) {
+                            error!(
+                                "Failed to add Oracle {:?} to cache: {}",
+                                oracle_address, err
+                            );
+                        } else {
+                            info!("Added the Oracle {:?} to cache.", oracle_address);
+                            oracle_counter += 1;
+                        }
                     }
                     None => {
                         error!("Failed to fetch the Oracle account {}", oracle_address);
@@ -215,9 +225,10 @@ impl<T: CommsClient> CacheLoader<T> {
             });
         }
 
-        self.cache.luts.populate(luts.clone())?;
+        let luts_total = luts.len();
+        self.cache.luts.populate(luts)?;
 
-        info!("Loaded {} Luts.", luts.len());
+        info!("Loaded {} Luts.", luts_total);
         Ok(())
     }
 }
