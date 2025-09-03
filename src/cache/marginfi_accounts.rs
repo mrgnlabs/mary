@@ -178,11 +178,12 @@ pub mod test_util {
             },
             account_flags: 0,
             migrated_from: Pubkey::default(),
+            migrated_to: Pubkey::default(),
             health_cache: HealthCache {
                 // Fill in the fields with appropriate dummy/test values
                 ..unsafe { std::mem::zeroed() }
             },
-            _padding0: [0; 17],
+            _padding0: [0; 13],
             authority: Pubkey::default(),
             emissions_destination_account: Pubkey::default(),
         }
