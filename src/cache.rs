@@ -181,7 +181,7 @@ impl<T: CommsClient> CacheLoader<T> {
                     Some(account) => {
                         if let Err(err) = self.cache.oracles.insert(
                             slot,
-                            oracle_address,
+                            &oracle_address,
                             oracle_data.oracle_type,
                             account.clone(),
                         ) {

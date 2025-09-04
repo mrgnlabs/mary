@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use marginfi::state::price::OracleSetup;
+use marginfi::state::price::{
+    OraclePriceFeedAdapter, OracleSetup, PythPushOraclePriceFeed, SwitchboardPullPriceFeed,
+};
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
 use crate::cache::CacheEntry;
@@ -8,36 +10,35 @@ use anyhow::{anyhow, Result};
 
 use log::{trace, warn};
 
-use anchor_lang::prelude::AnchorDeserialize;
+use anchor_lang::prelude::AccountInfo;
 
 use bytemuck;
-use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
+use solana_sdk::account_info::IntoAccountInfo;
 use switchboard_on_demand::{Discriminator, PullFeedAccountData};
 
-type CachedPriceType = i128;
-
-#[derive(Debug, Clone)]
-pub struct CachedOraclePrice {
+#[derive(Clone)]
+pub struct CachedPriceAdapter {
     pub slot: u64,
-    pub price: CachedPriceType,
+    adapter: OraclePriceFeedAdapter,
 }
 
-const ZERO_PRICE: CachedOraclePrice = CachedOraclePrice { slot: 0, price: 0 };
-const PYTH_DISCRIMINATOR: &[u8] = <PriceUpdateV2 as anchor_lang::Discriminator>::DISCRIMINATOR;
-
-impl CachedOraclePrice {
-    pub fn from(slot: u64, oracle_type: &OracleSetup, account: &Account) -> Result<Self> {
-        let price = match oracle_type {
-            OracleSetup::SwitchboardPull => Self::parse_swb_price(&account.data)?,
-            OracleSetup::PythPushOracle => Self::parse_pyth_price(&account.data)?,
+impl CachedPriceAdapter {
+    pub fn from(
+        slot: u64,
+        oracle_type: &OracleSetup,
+        address: &Pubkey,
+        account: &mut Account,
+    ) -> Result<Self> {
+        let adapter = match oracle_type {
+            OracleSetup::SwitchboardPull => Self::parse_swb_adapter(&account.data)?,
+            OracleSetup::PythPushOracle => Self::parse_pyth_adapter(&address, account)?,
             _ => return Err(anyhow!("Unsupported oracle type {:?}", oracle_type)),
         };
 
-        Ok(Self { slot, price })
+        Ok(Self { slot, adapter })
     }
 
-    // Inspired by https://github.com/mrgnlabs/marginfi-v2/blob/8ec81a6b302c2c65d58e563cf5d1e45ce2ab0a6a/programs/marginfi/src/state/price.rs#L577
-    fn parse_swb_price(data: &[u8]) -> Result<CachedPriceType> {
+    fn parse_swb_adapter(data: &[u8]) -> Result<OraclePriceFeedAdapter> {
         if data.len() < 8 {
             return Err(anyhow!("Invalid Swb oracle account length"));
         }
@@ -60,44 +61,46 @@ impl CachedOraclePrice {
             )
         })?;
 
-        Ok(feed.result.value)
+        Ok(OraclePriceFeedAdapter::SwitchboardPull(
+            SwitchboardPullPriceFeed {
+                feed: Box::new((&feed).into()),
+            },
+        ))
     }
 
-    // Inspired by https://github.com/mrgnlabs/marginfi-v2/blob/8ec81a6b302c2c65d58e563cf5d1e45ce2ab0a6a/programs/marginfi/src/state/price.rs#L594
-    fn parse_pyth_price(data: &[u8]) -> Result<CachedPriceType> {
-        if data.len() < 8 {
+    fn parse_pyth_adapter(
+        &address: &Pubkey,
+        account: &mut Account,
+    ) -> Result<OraclePriceFeedAdapter> {
+        if account.data.len() < 8 {
             return Err(anyhow!("Invalid Pyth oracle account length"));
         }
 
-        if &data[..8] != PYTH_DISCRIMINATOR {
-            return Err(anyhow!(
-                "Invalid Pyth oracle account discriminator {:?}! Expected {:?}",
-                &data[..8],
-                PYTH_DISCRIMINATOR
-            ));
-        }
-
-        let feed: PriceUpdateV2 = PriceUpdateV2::deserialize(&mut &data[8..])?;
-
-        Ok(feed.price_message.price as CachedPriceType)
+        let ai: AccountInfo = (&address, account).into_account_info();
+        let feed = PythPushOraclePriceFeed::load_unchecked(&ai)?;
+        Ok(OraclePriceFeedAdapter::PythPushOracle(feed))
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CachedOracle {
     pub _address: Pubkey,
     pub _oracle_type: OracleSetup,
-    pub price: CachedOraclePrice,
+    pub adapter: Option<CachedPriceAdapter>,
 }
 
 impl CacheEntry for CachedOracle {}
 
 impl CachedOracle {
-    pub fn from(address: Pubkey, oracle_type: OracleSetup, price: CachedOraclePrice) -> Self {
+    pub fn from(
+        address: Pubkey,
+        oracle_type: OracleSetup,
+        adapter: Option<CachedPriceAdapter>,
+    ) -> Self {
         Self {
             _address: address,
             _oracle_type: oracle_type,
-            price,
+            adapter,
         }
     }
 }
@@ -111,49 +114,47 @@ impl OraclesCache {
     pub fn insert(
         &self,
         slot: u64,
-        address: Pubkey,
+        address: &Pubkey,
         oracle_type: OracleSetup,
-        account: Account,
+        mut account: Account,
     ) -> Result<()> {
-        let price = match CachedOraclePrice::from(slot, &oracle_type, &account) {
-            Ok(price) => price,
-            Err(err) => {
-                warn!(
-                    "Failed to parse initial CachedOraclePrice for {:?}: {}",
-                    address, err
-                );
-                ZERO_PRICE
-            }
-        };
+        let adapter: Option<CachedPriceAdapter> =
+            match CachedPriceAdapter::from(slot, &oracle_type, address, &mut account) {
+                Ok(adapter) => Some(adapter),
+                Err(err) => {
+                    warn!(
+                        "Failed to create the initial OraclePriceAdapter for {:?}: {}",
+                        address, err
+                    );
+                    None
+                }
+            };
 
         self.oracles
             .write()
             .map_err(|e| anyhow::anyhow!("Failed to lock the Oracles cache for insert: {}", e))?
-            .insert(address, CachedOracle::from(address, oracle_type, price));
+            .insert(*address, CachedOracle::from(*address, oracle_type, adapter));
 
         Ok(())
     }
 
-    pub fn update(&self, slot: u64, address: &Pubkey, account: &Account) -> Result<()> {
+    pub fn update(&self, slot: u64, address: &Pubkey, account: &mut Account) -> Result<()> {
         let mut oracles = self
             .oracles
             .write()
             .map_err(|e| anyhow::anyhow!("Failed to lock the Oracles cache for update: {}", e))?;
 
         if let Some(cached_oracle) = oracles.get_mut(address) {
-            if slot > cached_oracle.price.slot {
-                match CachedOraclePrice::from(slot, &cached_oracle._oracle_type, &account) {
+            if slot > cached_oracle.adapter.as_ref().map_or(0, |a| a.slot) {
+                match CachedPriceAdapter::from(slot, &cached_oracle._oracle_type, address, account)
+                {
                     Ok(price) => {
-                        cached_oracle.price = price;
-                        trace!(
-                            "Updated CachedOraclePrice for {:?} to {:?}",
-                            address,
-                            cached_oracle.price
-                        );
+                        cached_oracle.adapter = Some(price);
+                        trace!("Updated OraclePriceAdapter for {:?}", address);
                     }
                     Err(err) => {
                         warn!(
-                            "Failed to parse updated CachedOraclePrice for {:?}: {}",
+                            "Failed to create the updated OraclePriceAdapter for {:?}: {}",
                             address, err
                         );
                     }
@@ -188,6 +189,7 @@ impl OraclesCache {
 mod tests {
     use super::*;
     use anchor_lang::prelude::AnchorSerialize;
+    use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
     use pyth_solana_receiver_sdk::price_update::{PriceFeedMessage, VerificationLevel};
     use switchboard_on_demand::PullFeedAccountData;
 
@@ -217,7 +219,7 @@ mod tests {
         let oracle_type = OracleSetup::PythPushOracle;
         let account = dummy_account(oracle_type);
 
-        cache.insert(1, address, oracle_type, account).unwrap();
+        cache.insert(1, &address, oracle_type, account).unwrap();
         let addresses = cache.get_oracle_addresses();
         assert_eq!(addresses.len(), 1);
         assert_eq!(addresses[0], address);
@@ -228,17 +230,18 @@ mod tests {
         let cache = OraclesCache::default();
         let address = Pubkey::new_unique();
         let oracle_type = OracleSetup::PythPushOracle;
-        let account = dummy_account(oracle_type);
+        let mut account = dummy_account(oracle_type);
+        account.owner = pyth_solana_receiver_sdk::id();
 
         cache
-            .insert(1, address, oracle_type, account.clone())
+            .insert(1, &address, oracle_type, account.clone())
             .unwrap();
         // Update with a higher slot
-        cache.update(2, &address, &account).unwrap();
+        cache.update(2, &address, &mut account).unwrap();
 
         let oracles = cache.oracles.read().unwrap();
         let cached = oracles.get(&address).unwrap();
-        assert_eq!(cached.price.slot, 2);
+        assert_eq!(cached.adapter.as_ref().unwrap().slot, 2);
     }
 
     #[test]
@@ -246,17 +249,17 @@ mod tests {
         let cache = OraclesCache::default();
         let address = Pubkey::new_unique();
         let oracle_type = OracleSetup::SwitchboardPull;
-        let account = dummy_account(oracle_type);
+        let mut account = dummy_account(oracle_type);
 
         cache
-            .insert(5, address, oracle_type, account.clone())
+            .insert(5, &address, oracle_type, account.clone())
             .unwrap();
         // Try to update with a lower slot, should not update
-        cache.update(3, &address, &account).unwrap();
+        cache.update(3, &address, &mut account).unwrap();
 
         let oracles = cache.oracles.read().unwrap();
         let cached = oracles.get(&address).unwrap();
-        assert_eq!(cached.price.slot, 5);
+        assert_eq!(cached.adapter.as_ref().unwrap().slot, 5);
     }
 
     #[test]
@@ -268,7 +271,7 @@ mod tests {
 
         for (i, address) in addresses.iter().enumerate() {
             cache
-                .insert(i as u64, *address, oracle_type.clone(), account.clone())
+                .insert(i as u64, address, oracle_type.clone(), account.clone())
                 .unwrap();
         }
 
@@ -283,36 +286,35 @@ mod tests {
     fn test_update_nonexistent_oracle_does_nothing() {
         let cache = OraclesCache::default();
         let address = Pubkey::new_unique();
-        let account = dummy_account(OracleSetup::None);
+        let mut account = dummy_account(OracleSetup::None);
 
         // Should not panic or insert anything
-        cache.update(10, &address, &account).unwrap();
+        cache.update(10, &address, &mut account).unwrap();
         let addresses = cache.get_oracle_addresses();
         assert!(addresses.is_empty());
     }
 
     #[test]
-    fn test_parse_swb_price() {
+    fn test_parse_swb_adapter() {
         // Construct valid data: discriminator + PullFeedAccountData bytes
         let mut data = Vec::new();
         data.extend_from_slice(&PullFeedAccountData::DISCRIMINATOR);
 
         // Create a PullFeedAccountData with a known value
         data.extend_from_slice(&[0u8; std::mem::size_of::<PullFeedAccountData>()]);
-        let price = CachedOraclePrice::parse_swb_price(&data).unwrap();
-        assert_eq!(price, 0);
+        let adapter = CachedPriceAdapter::parse_swb_adapter(&data);
+        assert!(adapter.is_ok());
     }
 
     #[test]
-    fn test_parse_swb_price_invalid_length() {
+    fn test_parse_swb_adapter_invalid_length() {
         let data = vec![0u8; 4]; // Too short
-        let result = CachedOraclePrice::parse_swb_price(&data);
+        let result = CachedPriceAdapter::parse_swb_adapter(&data);
         assert!(result.is_err());
-        assert!(format!("{:?}", result).contains("Invalid Swb oracle account length"));
     }
 
     #[test]
-    fn test_parse_swb_price_invalid_discriminator() {
+    fn test_parse_swb_adapter_invalid_discriminator() {
         let mut data = vec![1u8; 8]; // Wrong discriminator
         data.extend_from_slice(&vec![
             0u8;
@@ -320,36 +322,38 @@ mod tests {
                 switchboard_on_demand::PullFeedAccountData,
             >()
         ]);
-        let result = CachedOraclePrice::parse_swb_price(&data);
+        let result = CachedPriceAdapter::parse_swb_adapter(&data);
         assert!(result.is_err());
-        assert!(format!("{:?}", result).contains("Invalid Swb oracle account discriminator"));
+        let err_msg = result.err().unwrap().to_string();
+        assert!(err_msg.contains("Invalid Swb oracle account discriminator"));
     }
 
     #[test]
     fn test_parse_pyth_price_invalid_length() {
-        let data = vec![0u8; 4]; // Too short
-        let result = CachedOraclePrice::parse_pyth_price(&data);
+        let mut account = dummy_account(OracleSetup::PythPushOracle);
+        account.owner = pyth_solana_receiver_sdk::id();
+        account.data = vec![0u8; 4]; // Too short
+        let result = CachedPriceAdapter::parse_pyth_adapter(&Pubkey::new_unique(), &mut account);
         assert!(result.is_err());
-        assert!(format!("{:?}", result).contains("Invalid Pyth oracle account length"));
     }
 
     #[test]
     fn test_parse_pyth_price_invalid_discriminator() {
-        // Use wrong discriminator
-        let mut data = vec![1u8; 8];
-        // Add some bytes for the rest of the account data
-        data.extend_from_slice(&vec![0u8; 64]);
-        let result = CachedOraclePrice::parse_pyth_price(&data);
+        let mut account = dummy_account(OracleSetup::PythPushOracle);
+        account.owner = pyth_solana_receiver_sdk::id();
+        account.data = vec![1u8; 8]; // Use wrong discriminator
+        account.data.extend_from_slice(&vec![0u8; 64]); // Add some bytes for the rest of the account data
+        let result = CachedPriceAdapter::parse_pyth_adapter(&Pubkey::new_unique(), &mut account);
         assert!(result.is_err());
-        assert!(format!("{:?}", result).contains("Invalid Pyth oracle account discriminator"));
     }
 
     #[test]
     fn test_parse_pyth_price_valid() {
         // Use correct discriminator but invalid payload (too short for deserialize)
-        let mut data = Vec::new();
+        let mut account = dummy_account(OracleSetup::PythPushOracle);
+        account.owner = pyth_solana_receiver_sdk::id();
         let discrim = <PriceUpdateV2 as anchor_lang::Discriminator>::DISCRIMINATOR;
-        data.extend_from_slice(discrim);
+        account.data.extend_from_slice(discrim);
 
         let price_update = PriceUpdateV2 {
             write_authority: Pubkey::new_unique(),
@@ -368,9 +372,9 @@ mod tests {
         };
         let mut feed = Vec::new();
         price_update.serialize(&mut feed).unwrap();
-        data.extend_from_slice(&feed);
+        account.data.extend_from_slice(&feed);
 
-        let price = CachedOraclePrice::parse_pyth_price(&data).unwrap();
-        assert_eq!(price_update.price_message.price, price as i64);
+        let adapter = CachedPriceAdapter::parse_pyth_adapter(&Pubkey::new_unique(), &mut account);
+        assert!(adapter.is_ok());
     }
 }

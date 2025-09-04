@@ -34,8 +34,8 @@ impl GeyserProcessor {
         info!("Entering the GeyserProcessor loop.");
         while !self.stop.load(Ordering::Relaxed) {
             match self.geyser_rx.recv() {
-                Ok(msg) => {
-                    if let Err(err) = self.process_message(&msg) {
+                Ok(mut msg) => {
+                    if let Err(err) = self.process_message(&mut msg) {
                         error!("Failed to process Geyser message {:?}: {}", msg, err);
                     }
                 }
@@ -49,7 +49,7 @@ impl GeyserProcessor {
         Ok(())
     }
 
-    fn process_message(&self, msg: &GeyserMessage) -> anyhow::Result<()> {
+    fn process_message(&self, msg: &mut GeyserMessage) -> anyhow::Result<()> {
         trace!("Processing Geyser message: {}", msg);
         match msg.message_type {
             MessageType::Clock => {
@@ -70,7 +70,7 @@ impl GeyserProcessor {
             MessageType::Oracle => {
                 self.cache
                     .oracles
-                    .update(msg.slot, &msg.address, &msg.account)?;
+                    .update(msg.slot, &msg.address, &mut msg.account)?;
             }
         }
         Ok(())
