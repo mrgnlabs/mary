@@ -54,12 +54,7 @@ impl CachedPriceAdapter {
         let feed = bytemuck::try_pod_read_unaligned::<PullFeedAccountData>(
             &data[8..8 + std::mem::size_of::<PullFeedAccountData>()],
         )
-        .map_err(|err| {
-            anyhow!(
-                "Failed to read price from the Swb oracle account: {:?}",
-                err
-            )
-        })?;
+        .map_err(|err| anyhow!("Failed to parse the Swb oracle account: {:?}", err))?;
 
         Ok(OraclePriceFeedAdapter::SwitchboardPull(
             SwitchboardPullPriceFeed {
@@ -148,8 +143,8 @@ impl OraclesCache {
             if slot > cached_oracle.adapter.as_ref().map_or(0, |a| a.slot) {
                 match CachedPriceAdapter::from(slot, &cached_oracle._oracle_type, address, account)
                 {
-                    Ok(price) => {
-                        cached_oracle.adapter = Some(price);
+                    Ok(adapter) => {
+                        cached_oracle.adapter = Some(adapter);
                         trace!("Updated OraclePriceAdapter for {:?}", address);
                     }
                     Err(err) => {
@@ -329,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_pyth_price_invalid_length() {
+    fn test_parse_pyth_adapter_invalid_length() {
         let mut account = dummy_account(OracleSetup::PythPushOracle);
         account.owner = pyth_solana_receiver_sdk::id();
         account.data = vec![0u8; 4]; // Too short
@@ -338,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_pyth_price_invalid_discriminator() {
+    fn test_parse_pyth_adapter_invalid_discriminator() {
         let mut account = dummy_account(OracleSetup::PythPushOracle);
         account.owner = pyth_solana_receiver_sdk::id();
         account.data = vec![1u8; 8]; // Use wrong discriminator
@@ -348,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_pyth_price_valid() {
+    fn test_parse_pyth_adapter_valid() {
         // Use correct discriminator but invalid payload (too short for deserialize)
         let mut account = dummy_account(OracleSetup::PythPushOracle);
         account.owner = pyth_solana_receiver_sdk::id();
