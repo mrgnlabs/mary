@@ -19,7 +19,7 @@ pub struct CachedBankOracle {
 #[derive(Debug)]
 pub struct CachedBank {
     pub slot: u64,
-    pub _address: Pubkey,
+    pub address: Pubkey,
     bank: Bank,
     oracle: CachedBankOracle,
     // TODO: add pub asset_tag: ???,
@@ -32,7 +32,7 @@ impl CachedBank {
     pub fn from(slot: u64, address: Pubkey, bank: Bank) -> Self {
         Self {
             slot,
-            _address: address,
+            address,
             bank,
             oracle: CachedBankOracle {
                 oracle_type: bank.config.oracle_setup,
@@ -64,7 +64,7 @@ impl BanksCache {
             .get(&address)
             .map_or(true, |existing| existing.slot < upd_cached_bank.slot)
         {
-            trace!("Updating the Bank in cache: {:?}", upd_cached_bank);
+            trace!("Updating the Bank in cache: {:?}", upd_cached_bank.address);
             banks.insert(address, upd_cached_bank);
         }
 
@@ -155,7 +155,7 @@ mod tests {
         let cached = CachedBank::from(slot, address, bank);
 
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
+        assert_eq!(cached.address, address);
         assert_eq!(cached.mint(), bank.mint);
         assert_eq!(cached.oracle.oracle_type, bank.config.oracle_setup);
         assert_eq!(cached.oracle.oracle_addresses, vec![oracle1, oracle2]);
@@ -169,7 +169,7 @@ mod tests {
         let cached = CachedBank::from(slot, address, bank);
 
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
+        assert_eq!(cached.address, address);
     }
 
     #[test]
@@ -183,7 +183,7 @@ mod tests {
         let banks = cache.banks.read().unwrap();
         let cached = banks.get(&address).unwrap();
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
+        assert_eq!(cached.address, address);
     }
 
     #[test]

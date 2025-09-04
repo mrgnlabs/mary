@@ -61,7 +61,7 @@ impl GeyserProcessor {
                     MarginfiAccount::try_deserialize(&mut msg.account.data.as_slice())?;
                 self.cache
                     .marginfi_accounts
-                    .update(msg.slot, msg.address, &marginfi_account)?;
+                    .update(msg.slot, msg.address, marginfi_account)?;
             }
             MessageType::Bank => {
                 let bank: Bank = Bank::try_deserialize(&mut msg.account.data.as_slice())?;
