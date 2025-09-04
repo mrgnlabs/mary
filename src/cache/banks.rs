@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::RwLock};
 use anyhow::{anyhow, Result};
 use log::trace;
 use marginfi::state::{
+    emode::EmodeConfig,
     marginfi_group::{Bank, BankConfig},
     price::OracleSetup,
 };
@@ -22,8 +23,6 @@ pub struct CachedBank {
     pub address: Pubkey,
     bank: Bank,
     oracle: CachedBankOracle,
-    // TODO: add pub asset_tag: ???,
-    //emode config
 }
 
 impl CacheEntry for CachedBank {}
@@ -41,8 +40,12 @@ impl CachedBank {
         }
     }
 
-    pub fn mint(&self) -> Pubkey {
-        self.bank.mint
+    pub fn mint(&self) -> &Pubkey {
+        &self.bank.mint
+    }
+
+    pub fn _emode_config(&self) -> &EmodeConfig {
+        &self.bank.emode.emode_config
     }
 }
 
@@ -77,7 +80,7 @@ impl BanksCache {
             .read()
             .map_err(|e| anyhow!("Failed to lock the Banks cache for reading mints: {}", e))?
             .values()
-            .map(|bank| bank.mint())
+            .map(|bank| *bank.mint())
             .collect())
     }
 
@@ -156,7 +159,7 @@ mod tests {
 
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.mint(), bank.mint);
+        assert_eq!(cached.mint(), &bank.mint);
         assert_eq!(cached.oracle.oracle_type, bank.config.oracle_setup);
         assert_eq!(cached.oracle.oracle_addresses, vec![oracle1, oracle2]);
     }
@@ -356,7 +359,7 @@ mod tests {
         let banks = cache.banks.read().unwrap();
         let cached = banks.get(&address).unwrap();
         // Should be the last inserted bank with the same slot
-        assert_eq!(cached.mint(), bank1.mint);
+        assert_eq!(cached.mint(), &bank1.mint);
     }
 
     #[test]

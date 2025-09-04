@@ -416,8 +416,8 @@ mod tests {
 
         // The oracles should now be present in the cache
         let oracles_cache = &cache.oracles;
-        assert!(oracles_cache.get(&oracle_pubkey1).is_ok());
-        assert!(oracles_cache.get(&oracle_pubkey2).is_ok());
+        assert!(oracles_cache._get(&oracle_pubkey1).is_ok());
+        assert!(oracles_cache._get(&oracle_pubkey2).is_ok());
     }
 
     #[test]
