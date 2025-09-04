@@ -162,7 +162,7 @@ impl OraclesCache {
         Ok(())
     }
 
-    pub fn get(&self, address: &Pubkey) -> Result<Option<CachedOracle>> {
+    pub fn _get(&self, address: &Pubkey) -> Result<Option<CachedOracle>> {
         Ok(self
             .oracles
             .read()

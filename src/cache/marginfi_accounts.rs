@@ -1,36 +1,18 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::{anyhow, Result};
-use fixed::types::I80F48;
 use log::trace;
 use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::cache::CacheEntry;
 
-#[derive(Debug, Clone)]
-pub struct CachedPosition {
-    pub bank: Pubkey,
-    // TODO: make sure that we really need to use the I80F48 type here. It depends on what type is used for calling the protocol API
-    pub asset_shares: I80F48,
-    pub liability_shares: I80F48,
-}
-
-impl CachedPosition {
-    pub fn from(balance: &Balance) -> Self {
-        Self {
-            bank: balance.bank_pk,
-            asset_shares: balance.asset_shares.into(),
-            liability_shares: balance.liability_shares.into(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct CachedMarginfiAccount {
     slot: u64,
     address: Pubkey,
-    marginfi_account: MarginfiAccount,
+    _marginfi_account: MarginfiAccount,
+    _positions: Vec<Balance>,
 }
 
 impl std::fmt::Debug for CachedMarginfiAccount {
@@ -47,10 +29,19 @@ impl CacheEntry for CachedMarginfiAccount {}
 
 impl CachedMarginfiAccount {
     pub fn from(slot: u64, address: Pubkey, marginfi_account: MarginfiAccount) -> Self {
+        let positions = marginfi_account
+            .lending_account
+            .balances
+            .iter()
+            .filter(|balance| balance.active != 0)
+            .cloned()
+            .collect();
+
         Self {
             slot,
             address,
-            marginfi_account,
+            _marginfi_account: marginfi_account,
+            _positions: positions,
         }
     }
 
@@ -62,14 +53,8 @@ impl CachedMarginfiAccount {
         0
     }
 
-    pub fn positions(&self) -> Vec<CachedPosition> {
-        self.marginfi_account
-            .lending_account
-            .balances
-            .iter()
-            .filter(|balance| balance.active != 0)
-            .map(CachedPosition::from)
-            .collect()
+    pub fn _positions(&self) -> &Vec<Balance> {
+        &self._positions
     }
 }
 
@@ -142,7 +127,7 @@ impl MarginfiAccountsCache {
 
 #[cfg(test)]
 pub mod test_util {
-    use super::*;
+    use fixed::types::I80F48;
     use marginfi::state::{
         health_cache::HealthCache,
         marginfi_account::{Balance, LendingAccount, MarginfiAccount},
@@ -210,21 +195,9 @@ pub mod test_util {
 mod tests {
     use super::test_util::{create_balance, create_marginfi_account};
     use super::*;
+    use fixed::types::I80F48;
+    use marginfi::state::marginfi_group::WrappedI80F48;
     use solana_sdk::pubkey::Pubkey;
-
-    #[test]
-    fn test_cached_position_from_balance() {
-        let bank = Pubkey::new_unique();
-        let asset = 12345;
-        let liability = 6789;
-        let balance = create_balance(bank, asset, liability);
-
-        let cached = CachedPosition::from(&balance);
-
-        assert_eq!(cached.bank, bank);
-        assert_eq!(cached.asset_shares, I80F48::from_num(asset));
-        assert_eq!(cached.liability_shares, I80F48::from_num(liability));
-    }
 
     #[test]
     fn test_cached_marginfi_account_from() {
@@ -244,13 +217,25 @@ mod tests {
 
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.positions().len(), 2);
-        assert_eq!(cached.positions()[0].bank, bank1);
-        assert_eq!(cached.positions()[1].bank, bank2);
-        assert_eq!(cached.positions()[0].asset_shares, I80F48::from_num(100));
-        assert_eq!(cached.positions()[0].liability_shares, I80F48::from_num(50));
-        assert_eq!(cached.positions()[1].asset_shares, I80F48::from_num(200));
-        assert_eq!(cached.positions()[1].liability_shares, I80F48::from_num(75));
+        assert_eq!(cached._positions().len(), 2);
+        assert_eq!(cached._positions()[0].bank_pk, bank1);
+        assert_eq!(cached._positions()[1].bank_pk, bank2);
+        assert_eq!(
+            cached._positions()[0].asset_shares,
+            WrappedI80F48::from(I80F48::from_num(100))
+        );
+        assert_eq!(
+            cached._positions()[0].liability_shares,
+            WrappedI80F48::from(I80F48::from_num(50))
+        );
+        assert_eq!(
+            cached._positions()[1].asset_shares,
+            WrappedI80F48::from(I80F48::from_num(200))
+        );
+        assert_eq!(
+            cached._positions()[1].liability_shares,
+            WrappedI80F48::from(I80F48::from_num(75))
+        );
     }
 
     #[test]
@@ -272,8 +257,8 @@ mod tests {
             .expect("account should be cached");
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.positions().len(), 1);
-        assert_eq!(cached.positions()[0].bank, bank);
+        assert_eq!(cached._positions().len(), 1);
+        assert_eq!(cached._positions()[0].bank_pk, bank);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address), Some(&0));
@@ -300,7 +285,7 @@ mod tests {
 
         let cached = cache.get_account(&address).unwrap();
         assert_eq!(cached.slot, 2);
-        assert_eq!(cached.positions()[0].bank, bank2);
+        assert_eq!(cached._positions()[0].bank_pk, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address), Some(&0));
@@ -333,9 +318,15 @@ mod tests {
         let cached = cache.get_account(&address).unwrap();
         // Should still have the new slot and data
         assert_eq!(cached.slot, 10);
-        assert_eq!(cached.positions()[0].bank, bank_new);
-        assert_eq!(cached.positions()[0].asset_shares, I80F48::from_num(10));
-        assert_eq!(cached.positions()[0].liability_shares, I80F48::from_num(20));
+        assert_eq!(cached._positions()[0].bank_pk, bank_new);
+        assert_eq!(
+            cached._positions()[0].asset_shares,
+            WrappedI80F48::from(I80F48::from_num(10))
+        );
+        assert_eq!(
+            cached._positions()[0].liability_shares,
+            WrappedI80F48::from(I80F48::from_num(20))
+        );
     }
 
     #[test]
@@ -379,8 +370,8 @@ mod tests {
 
         assert_eq!(cached1.slot, slot1);
         assert_eq!(cached2.slot, slot2);
-        assert_eq!(cached1.positions()[0].bank, bank1);
-        assert_eq!(cached2.positions()[0].bank, bank2);
+        assert_eq!(cached1._positions()[0].bank_pk, bank1);
+        assert_eq!(cached2._positions()[0].bank_pk, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address1), Some(&0));
