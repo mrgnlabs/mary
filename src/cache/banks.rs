@@ -16,30 +16,32 @@ pub struct CachedBankOracle {
 #[derive(Clone, Debug)]
 pub struct CachedBank {
     pub slot: u64,
-    pub _address: Pubkey,
-    pub _mint_decimals: u8,
-    pub mint: Pubkey,
-    pub _group: Pubkey,
-    pub oracle: CachedBankOracle,
-    // TODO: add pub asset_tag: ???,
-    //emode config
+    pub address: Pubkey,
+    bank: Bank,
+    oracle: CachedBankOracle,
 }
 
 impl CacheEntry for CachedBank {}
 
 impl CachedBank {
-    pub fn from(slot: u64, address: Pubkey, bank: &Bank) -> Self {
+    pub fn from(slot: u64, address: Pubkey, bank: Bank) -> Self {
         Self {
             slot,
-            _address: address,
-            mint: bank.mint,
-            _mint_decimals: bank.mint_decimals,
-            _group: bank.group,
+            address,
+            bank,
             oracle: CachedBankOracle {
                 oracle_type: bank.config.oracle_setup,
                 oracle_addresses: get_oracle_accounts(&bank.config),
             },
         }
+    }
+
+    pub fn mint(&self) -> &Pubkey {
+        &self.bank.mint
+    }
+
+    pub fn _emode_config(&self) -> &EmodeConfig {
+        &self.bank.emode.emode_config
     }
 }
 
@@ -50,7 +52,7 @@ pub struct BanksCache {
 
 impl BanksCache {
     pub fn update(&self, slot: u64, address: Pubkey, bank: &Bank) -> Result<()> {
-        let upd_cached_bank = CachedBank::from(slot, address, bank);
+        let upd_cached_bank = CachedBank::from(slot, address, *bank);
 
         let mut banks = self
             .banks
@@ -61,7 +63,7 @@ impl BanksCache {
             .get(&address)
             .map_or(true, |existing| existing.slot < upd_cached_bank.slot)
         {
-            trace!("Updating the Bank in cache: {:?}", upd_cached_bank);
+            trace!("Updating the Bank in cache: {:?}", upd_cached_bank.address);
             banks.insert(address, upd_cached_bank);
         }
 
@@ -74,7 +76,7 @@ impl BanksCache {
             .read()
             .map_err(|e| anyhow!("Failed to lock the Banks cache for reading mints: {}", e))?
             .values()
-            .map(|bank| bank.mint)
+            .map(|bank| *bank.mint())
             .collect())
     }
 
@@ -154,8 +156,8 @@ pub mod test_util {
         }
     }
 
-    pub fn create_dummy_cached_bank() -> CachedBank {
-        CachedBank::from(0, Pubkey::new_unique(), &create_bank_with_oracles(vec![]))
+    pub fn _create_dummy_cached_bank() -> CachedBank {
+        CachedBank::from(0, Pubkey::new_unique(), create_bank_with_oracles(vec![]))
     }
 }
 
@@ -173,13 +175,11 @@ mod tests {
         let oracle1 = Pubkey::new_unique();
         let oracle2 = Pubkey::new_unique();
         let bank = create_bank_with_oracles(vec![oracle1, Pubkey::default(), oracle2]);
-        let cached = CachedBank::from(slot, address, &bank);
+        let cached = CachedBank::from(slot, address, bank);
 
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
-        assert_eq!(cached.mint, bank.mint);
-        assert_eq!(cached._mint_decimals, bank.mint_decimals);
-        assert_eq!(cached._group, bank.group);
+        assert_eq!(cached.address, address);
+        assert_eq!(cached.mint(), &bank.mint);
         assert_eq!(cached.oracle.oracle_type, bank.config.oracle_setup);
         assert_eq!(cached.oracle.oracle_addresses, vec![oracle1, oracle2]);
     }
@@ -189,10 +189,10 @@ mod tests {
         let slot = 42;
         let address = Pubkey::new_unique();
         let bank = create_bank_with_oracles(vec![]);
-        let cached = CachedBank::from(slot, address, &bank);
+        let cached = CachedBank::from(slot, address, bank);
 
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
+        assert_eq!(cached.address, address);
     }
 
     #[test]
@@ -206,7 +206,7 @@ mod tests {
         let banks = cache.banks.read().unwrap();
         let cached = banks.get(&address).unwrap();
         assert_eq!(cached.slot, slot);
-        assert_eq!(cached._address, address);
+        assert_eq!(cached.address, address);
     }
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
         let banks = cache.banks.read().unwrap();
         let cached = banks.get(&address).unwrap();
         // Should be the last inserted bank with the same slot
-        assert_eq!(cached.mint, bank1.mint);
+        assert_eq!(cached.mint(), &bank1.mint);
     }
 
     #[test]
