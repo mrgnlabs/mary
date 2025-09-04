@@ -1,5 +1,5 @@
 use anchor_lang::prelude::AccountMeta;
-use marginfi::{bank_authority_seed, state::marginfi_group::BankVaultType};
+use marginfi::{bank_authority_seed, state::bank::BankVaultType};
 use solana_sdk::pubkey::Pubkey;
 use anchor_spl::token_2022;
 

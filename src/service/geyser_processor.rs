@@ -6,7 +6,7 @@ use std::sync::{
 use anchor_lang::AccountDeserialize;
 use crossbeam::channel::Receiver;
 use log::{error, info, trace};
-use marginfi::state::{marginfi_account::MarginfiAccount, marginfi_group::Bank};
+use marginfi_type_crate::types::{Bank, MarginfiAccount};
 use solana_sdk::clock::Clock;
 
 use crate::{cache::Cache, common::MessageType, service::geyser_subscriber::GeyserMessage};
@@ -88,7 +88,7 @@ mod tests {
     use crate::cache::{
         banks::test_util::create_bank_with_oracles,
         marginfi_accounts::test_util::create_marginfi_account,
-        test_util::{create_dummy_cache, generate_test_clock},
+        test_util::{create_dummy_cache},
         Cache,
     };
     use crate::common::MessageType;
@@ -128,9 +128,9 @@ mod tests {
 
     #[test]
     fn test_process_clock_message() {
-        let (processor, tx, stop, cache) = setup_processor();
+        let (processor, tx, stop, _) = setup_processor();
         let clock = Clock::default();
-        let data = bincode::serialize(&clock).unwrap();
+        let _ = bincode::serialize(&clock).unwrap();
         let msg = GeyserMessage {
             message_type: MessageType::Clock,
             slot: 1,

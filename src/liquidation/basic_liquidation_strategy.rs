@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anchor_spl::associated_token;
 use log::debug;
-use marginfi_type_crate::types::{Bank, LendingAccount};
+use marginfi_type_crate::types::{Bank, user_account::*};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer, system_program};
 use solana_program::{sysvar};
 use anyhow::Result;
@@ -98,10 +98,10 @@ impl<T: CommsClient> BasicLiquidationStrategy<T> {
 
     maybe_add_bank_mint(&mut accounts, mint_key, &mint_account.owner);
 
-        let lending_account = self.cache.marginfi_accounts.get(&liquidatee_key)?.lending_account;
+        let active_bank_pks = self.cache.marginfi_accounts.get(&liquidatee_key)?.positions.iter().map(|p| p.bank).collect();
     
     let banks_map: HashMap<Pubkey, Bank> = self.cache.banks.get_banks_map();
-    let observation_accounts = lending_account.load_observation_account_metas(&banks_map, vec![], vec![]); // TODO: optimize
+    let observation_accounts = load_observation_account_metas(active_bank_pks, &banks_map, &[], &[]);
 
     println!(
         "withdraw: observation_accounts: {:?}",

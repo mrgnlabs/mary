@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::RwLock};
 use anyhow::{anyhow, Result};
 use fixed::types::I80F48;
 use log::trace;
-use marginfi_type_crate::types::{Balance, LendingAccount, MarginfiAccount};
+use marginfi_type_crate::types::{Balance, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::cache::CacheEntry;
@@ -34,7 +34,6 @@ pub struct CachedMarginfiAccount {
     pub health: u64, // account.health_cache.asset_value_maint - liab_value_maint cast to max hashmap max size
     pub positions: Vec<CachedPosition>,
     pub liquidation_record: Pubkey,
-    pub lending_account: LendingAccount, // TODO: think about simplification
 }
 
 impl CacheEntry for CachedMarginfiAccount {}
@@ -56,7 +55,6 @@ impl CachedMarginfiAccount {
             health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
             positions,
             liquidation_record: Pubkey::default(),
-            lending_account: marginfi_account.lending_account.clone(),
         }
     }
 }

@@ -103,6 +103,21 @@ impl BanksCache {
             .ok_or(anyhow!("Failed to get the bank from cache"))?.clone();
         Ok(cached_bank)
     }
+
+    pub fn get_banks_map(&self) -> anyhow::Result<HashMap<Pubkey, Bank>> {
+        Ok(self
+            .banks
+            .read()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to lock the banks cache for reading oracle accounts: {}",
+                    e
+                )
+            })?
+            .values()
+            .map(|bank| (bank._address, Bank {})bank.oracle.clone())
+            .collect())
+    }
 }
 
 fn get_oracle_accounts(bank_config: &BankConfig) -> Vec<Pubkey> {

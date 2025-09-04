@@ -1,6 +1,5 @@
 pub mod rpc_comms_client;
 
-use fixed::types::I80F48;
 pub use rpc_comms_client::RpcCommsClient;
 
 use anyhow::Result;
@@ -20,7 +19,7 @@ pub trait CommsClient: Send + Sync {
 
     fn get_accounts(&self, addresses: &[Pubkey]) -> Result<Vec<(Pubkey, Account)>>;
 
-    fn send_ix(&self, ix: Instruction) -> Result<()>; // KEEP HERE
+    fn send_ix(&self, ix: Instruction) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -72,5 +71,11 @@ pub mod test_util {
             }
             Ok(accounts)
         }
+
+    fn send_ix(&self, ix: Instruction) -> Result<()>
+    {
+        println!("Sending instruction: {:?}", ix);
+        Ok(())
+    }
     }
 }
