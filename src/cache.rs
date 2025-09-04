@@ -117,7 +117,7 @@ impl<T: CommsClient> CacheLoader<T> {
                         MarginfiAccount::try_deserialize(&mut account.data.as_slice())?;
                     self.cache
                         .marginfi_accounts
-                        .update(slot, address, &marginfi_account)?;
+                        .update(slot, address, marginfi_account)?;
                     trace!("Added the Marginfi Account {:?} to cache.", address);
                     marginfi_accounts_count += 1;
                 }

@@ -12,14 +12,13 @@ use log::{trace, warn};
 
 use anchor_lang::prelude::AccountInfo;
 
-use bytemuck;
 use solana_sdk::account_info::IntoAccountInfo;
 use switchboard_on_demand::{Discriminator, PullFeedAccountData};
 
 #[derive(Clone)]
 pub struct CachedPriceAdapter {
     pub slot: u64,
-    adapter: OraclePriceFeedAdapter,
+    _adapter: OraclePriceFeedAdapter,
 }
 
 impl CachedPriceAdapter {
@@ -31,11 +30,14 @@ impl CachedPriceAdapter {
     ) -> Result<Self> {
         let adapter = match oracle_type {
             OracleSetup::SwitchboardPull => Self::parse_swb_adapter(&account.data)?,
-            OracleSetup::PythPushOracle => Self::parse_pyth_adapter(&address, account)?,
+            OracleSetup::PythPushOracle => Self::parse_pyth_adapter(address, account)?,
             _ => return Err(anyhow!("Unsupported oracle type {:?}", oracle_type)),
         };
 
-        Ok(Self { slot, adapter })
+        Ok(Self {
+            slot,
+            _adapter: adapter,
+        })
     }
 
     fn parse_swb_adapter(data: &[u8]) -> Result<OraclePriceFeedAdapter> {
@@ -81,7 +83,7 @@ impl CachedPriceAdapter {
 pub struct CachedOracle {
     pub _address: Pubkey,
     pub _oracle_type: OracleSetup,
-    pub adapter: Option<CachedPriceAdapter>,
+    adapter: Option<CachedPriceAdapter>,
 }
 
 impl CacheEntry for CachedOracle {}

@@ -26,34 +26,50 @@ impl CachedPosition {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CachedMarginfiAccount {
     slot: u64,
     address: Pubkey,
-    pub group: Pubkey,
-    pub health: u64, // account.health_cache.asset_value_maint - liab_value_maint cast to max hashmap max size
-    pub positions: Vec<CachedPosition>,
+    marginfi_account: MarginfiAccount,
+}
+
+impl std::fmt::Debug for CachedMarginfiAccount {
+    // TODO: add more relevant fields
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedMarginfiAccount")
+            .field("slot", &self.slot)
+            .field("address", &self.address)
+            .finish()
+    }
 }
 
 impl CacheEntry for CachedMarginfiAccount {}
 
 impl CachedMarginfiAccount {
-    pub fn from(slot: u64, address: Pubkey, marginfi_account: &MarginfiAccount) -> Self {
-        let positions = marginfi_account
+    pub fn from(slot: u64, address: Pubkey, marginfi_account: MarginfiAccount) -> Self {
+        Self {
+            slot,
+            address,
+            marginfi_account,
+        }
+    }
+
+    pub fn health(&self) -> u64 {
+        /*
+        self.marginfi_account.health_cache.asset_value_maint
+            - self.marginfi_account.health_cache.liability_value_maint
+            */
+        0
+    }
+
+    pub fn positions(&self) -> Vec<CachedPosition> {
+        self.marginfi_account
             .lending_account
             .balances
             .iter()
             .filter(|balance| balance.active != 0)
             .map(CachedPosition::from)
-            .collect();
-
-        Self {
-            slot,
-            address,
-            group: marginfi_account.group,
-            health: 0, //TODO: either recover from the MarginfiAccount.HealthCache or replace with meaningful HealthCache properties
-            positions,
-        }
+            .collect()
     }
 }
 
@@ -64,9 +80,9 @@ pub struct MarginfiAccountsCache {
 }
 
 impl MarginfiAccountsCache {
-    pub fn update(&self, slot: u64, address: Pubkey, account: &MarginfiAccount) -> Result<()> {
+    pub fn update(&self, slot: u64, address: Pubkey, account: MarginfiAccount) -> Result<()> {
         let upd_cached_account = CachedMarginfiAccount::from(slot, address, account);
-        let upd_cached_account_health = upd_cached_account.health;
+        let upd_cached_account_health = upd_cached_account.health();
 
         let mut accounts = self.accounts.write().map_err(|e| {
             anyhow!(
@@ -224,18 +240,17 @@ mod tests {
         ];
         let marginfi_account = create_marginfi_account(group, balances.clone());
 
-        let cached = CachedMarginfiAccount::from(slot, address, &marginfi_account);
+        let cached = CachedMarginfiAccount::from(slot, address, marginfi_account);
 
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.group, group);
-        assert_eq!(cached.positions.len(), 2);
-        assert_eq!(cached.positions[0].bank, bank1);
-        assert_eq!(cached.positions[1].bank, bank2);
-        assert_eq!(cached.positions[0].asset_shares, I80F48::from_num(100));
-        assert_eq!(cached.positions[0].liability_shares, I80F48::from_num(50));
-        assert_eq!(cached.positions[1].asset_shares, I80F48::from_num(200));
-        assert_eq!(cached.positions[1].liability_shares, I80F48::from_num(75));
+        assert_eq!(cached.positions().len(), 2);
+        assert_eq!(cached.positions()[0].bank, bank1);
+        assert_eq!(cached.positions()[1].bank, bank2);
+        assert_eq!(cached.positions()[0].asset_shares, I80F48::from_num(100));
+        assert_eq!(cached.positions()[0].liability_shares, I80F48::from_num(50));
+        assert_eq!(cached.positions()[1].asset_shares, I80F48::from_num(200));
+        assert_eq!(cached.positions()[1].liability_shares, I80F48::from_num(75));
     }
 
     #[test]
@@ -249,7 +264,7 @@ mod tests {
         let marginfi_account = create_marginfi_account(group, balances);
 
         cache
-            .update(slot, address, &marginfi_account)
+            .update(slot, address, marginfi_account)
             .expect("update should succeed");
 
         let cached = cache
@@ -257,9 +272,8 @@ mod tests {
             .expect("account should be cached");
         assert_eq!(cached.slot, slot);
         assert_eq!(cached.address, address);
-        assert_eq!(cached.group, group);
-        assert_eq!(cached.positions.len(), 1);
-        assert_eq!(cached.positions[0].bank, bank);
+        assert_eq!(cached.positions().len(), 1);
+        assert_eq!(cached.positions()[0].bank, bank);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address), Some(&0));
@@ -278,16 +292,15 @@ mod tests {
         let marginfi_account2 = create_marginfi_account(group2, vec![create_balance(bank2, 3, 4)]);
 
         cache
-            .update(1, address, &marginfi_account1)
+            .update(1, address, marginfi_account1)
             .expect("first update");
         cache
-            .update(2, address, &marginfi_account2)
+            .update(2, address, marginfi_account2)
             .expect("second update");
 
         let cached = cache.get_account(&address).unwrap();
         assert_eq!(cached.slot, 2);
-        assert_eq!(cached.group, group2);
-        assert_eq!(cached.positions[0].bank, bank2);
+        assert_eq!(cached.positions()[0].bank, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address), Some(&0));
@@ -309,21 +322,20 @@ mod tests {
 
         // Insert with higher slot first
         cache
-            .update(10, address, &marginfi_account_new)
+            .update(10, address, marginfi_account_new)
             .expect("first update with new slot");
 
         // Try to update with lower slot
         cache
-            .update(5, address, &marginfi_account_old)
+            .update(5, address, marginfi_account_old)
             .expect("second update with old slot");
 
         let cached = cache.get_account(&address).unwrap();
         // Should still have the new slot and data
         assert_eq!(cached.slot, 10);
-        assert_eq!(cached.group, group_new);
-        assert_eq!(cached.positions[0].bank, bank_new);
-        assert_eq!(cached.positions[0].asset_shares, I80F48::from_num(10));
-        assert_eq!(cached.positions[0].liability_shares, I80F48::from_num(20));
+        assert_eq!(cached.positions()[0].bank, bank_new);
+        assert_eq!(cached.positions()[0].asset_shares, I80F48::from_num(10));
+        assert_eq!(cached.positions()[0].liability_shares, I80F48::from_num(20));
     }
 
     #[test]
@@ -359,16 +371,16 @@ mod tests {
         let marginfi_account2 =
             create_marginfi_account(group2, vec![create_balance(bank2, 33, 44)]);
 
-        cache.update(slot1, address1, &marginfi_account1).unwrap();
-        cache.update(slot2, address2, &marginfi_account2).unwrap();
+        cache.update(slot1, address1, marginfi_account1).unwrap();
+        cache.update(slot2, address2, marginfi_account2).unwrap();
 
         let cached1 = cache.get_account(&address1).unwrap();
         let cached2 = cache.get_account(&address2).unwrap();
 
         assert_eq!(cached1.slot, slot1);
         assert_eq!(cached2.slot, slot2);
-        assert_eq!(cached1.positions[0].bank, bank1);
-        assert_eq!(cached2.positions[0].bank, bank2);
+        assert_eq!(cached1.positions()[0].bank, bank1);
+        assert_eq!(cached2.positions()[0].bank, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
         assert_eq!(health_map.get(&address1), Some(&0));
