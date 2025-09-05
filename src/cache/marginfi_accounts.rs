@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::{anyhow, Result};
-use log::trace;
+use fixed::types::I80F48;
+use log::{trace, warn};
 use marginfi::state::marginfi_account::{Balance, MarginfiAccount};
 use solana_sdk::pubkey::Pubkey;
 
@@ -14,6 +15,8 @@ pub struct CachedMarginfiAccount {
     _marginfi_account: MarginfiAccount,
     _positions: Vec<Balance>,
 }
+
+const INVALID_HEALTH: i64 = i64::MIN;
 
 impl std::fmt::Debug for CachedMarginfiAccount {
     // TODO: add more relevant fields
@@ -45,12 +48,24 @@ impl CachedMarginfiAccount {
         }
     }
 
-    pub fn health(&self) -> u64 {
-        /*
-        self.marginfi_account.health_cache.asset_value_maint
-            - self.marginfi_account.health_cache.liability_value_maint
-            */
-        0
+    #[inline]
+    pub fn asset_value_maint(&self) -> I80F48 {
+        self._marginfi_account.health_cache.asset_value_maint.into()
+    }
+
+    #[inline]
+    pub fn liability_value_maint(&self) -> I80F48 {
+        self._marginfi_account
+            .health_cache
+            .liability_value_maint
+            .into()
+    }
+
+    #[inline]
+    pub fn health(&self) -> Option<i64> {
+        (self.asset_value_maint() - self.liability_value_maint())
+            .checked_div(self.asset_value_maint())
+            .map(|v| v.to_num::<i64>())
     }
 
     pub fn _positions(&self) -> &Vec<Balance> {
@@ -61,7 +76,7 @@ impl CachedMarginfiAccount {
 #[derive(Default)]
 pub struct MarginfiAccountsCache {
     accounts: RwLock<HashMap<Pubkey, CachedMarginfiAccount>>,
-    account_to_health: RwLock<HashMap<Pubkey, u64>>,
+    account_to_health: RwLock<HashMap<Pubkey, i64>>,
 }
 
 impl MarginfiAccountsCache {
@@ -91,7 +106,19 @@ impl MarginfiAccountsCache {
                 upd_cached_account
             );
             accounts.insert(address, upd_cached_account);
-            health.insert(address, upd_cached_account_health);
+
+            match upd_cached_account_health {
+                Some(upd_health) => {
+                    health.insert(address, upd_health);
+                }
+                None => {
+                    warn!(
+                        "Failed to compute health for account {}, invalidating it",
+                        address
+                    );
+                    health.insert(address, INVALID_HEALTH);
+                }
+            }
         }
 
         Ok(())
@@ -111,7 +138,7 @@ impl MarginfiAccountsCache {
             .ok_or_else(|| anyhow!("Account {} not found in cache", address))
     }
 
-    pub fn get_accounts_with_health(&self) -> Result<HashMap<Pubkey, u64>> {
+    pub fn get_accounts_with_health(&self) -> Result<HashMap<Pubkey, i64>> {
         Ok(self
             .account_to_health
             .read()
@@ -261,7 +288,7 @@ mod tests {
         assert_eq!(cached._positions()[0].bank_pk, bank);
 
         let health_map = cache.get_accounts_with_health().unwrap();
-        assert_eq!(health_map.get(&address), Some(&0));
+        assert_eq!(health_map.get(&address), Some(&INVALID_HEALTH));
     }
 
     #[test]
@@ -288,7 +315,7 @@ mod tests {
         assert_eq!(cached._positions()[0].bank_pk, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
-        assert_eq!(health_map.get(&address), Some(&0));
+        assert_eq!(health_map.get(&address), Some(&INVALID_HEALTH));
     }
 
     #[test]
@@ -374,7 +401,79 @@ mod tests {
         assert_eq!(cached2._positions()[0].bank_pk, bank2);
 
         let health_map = cache.get_accounts_with_health().unwrap();
-        assert_eq!(health_map.get(&address1), Some(&0));
-        assert_eq!(health_map.get(&address2), Some(&0));
+        assert_eq!(health_map.get(&address1), Some(&INVALID_HEALTH));
+        assert_eq!(health_map.get(&address2), Some(&INVALID_HEALTH));
+    }
+
+    #[test]
+    fn test_asset_value_maint_and_liability_value_maint() {
+        let slot = 1;
+        let address = Pubkey::new_unique();
+        let group = Pubkey::new_unique();
+        let bank = Pubkey::new_unique();
+
+        let mut marginfi_account =
+            create_marginfi_account(group, vec![create_balance(bank, 100, 50)]);
+        // Set health_cache values
+        marginfi_account.health_cache.asset_value_maint = I80F48::from_num(500).into();
+        marginfi_account.health_cache.liability_value_maint = I80F48::from_num(200).into();
+
+        let cached = CachedMarginfiAccount::from(slot, address, marginfi_account);
+
+        assert_eq!(cached.asset_value_maint(), I80F48::from_num(500));
+        assert_eq!(cached.liability_value_maint(), I80F48::from_num(200));
+    }
+
+    #[test]
+    fn test_health_returns_some_when_asset_value_maint_nonzero() {
+        let slot = 1;
+        let address = Pubkey::new_unique();
+        let group = Pubkey::new_unique();
+        let bank = Pubkey::new_unique();
+
+        let mut marginfi_account =
+            create_marginfi_account(group, vec![create_balance(bank, 100, 50)]);
+        marginfi_account.health_cache.asset_value_maint = I80F48::from_num(1000).into();
+        marginfi_account.health_cache.liability_value_maint = I80F48::from_num(500).into();
+
+        let cached = CachedMarginfiAccount::from(slot, address, marginfi_account);
+
+        // health = (1000 - 500) / 1000 = 0.5 -> to_num::<u64>() = 0
+        assert_eq!(cached.health(), Some(0));
+    }
+
+    #[test]
+    fn test_health_returns_none_when_asset_value_maint_zero() {
+        let slot = 1;
+        let address = Pubkey::new_unique();
+        let group = Pubkey::new_unique();
+        let bank = Pubkey::new_unique();
+
+        let mut marginfi_account =
+            create_marginfi_account(group, vec![create_balance(bank, 100, 50)]);
+        marginfi_account.health_cache.asset_value_maint = I80F48::from_num(0).into();
+        marginfi_account.health_cache.liability_value_maint = I80F48::from_num(500).into();
+
+        let cached = CachedMarginfiAccount::from(slot, address, marginfi_account);
+
+        assert_eq!(cached.health(), None);
+    }
+
+    #[test]
+    fn test_health_negative_liability() {
+        let slot = 1;
+        let address = Pubkey::new_unique();
+        let group = Pubkey::new_unique();
+        let bank = Pubkey::new_unique();
+
+        let mut marginfi_account =
+            create_marginfi_account(group, vec![create_balance(bank, 100, 50)]);
+        marginfi_account.health_cache.asset_value_maint = I80F48::from_num(1000).into();
+        marginfi_account.health_cache.liability_value_maint = I80F48::from_num(1500).into();
+
+        let cached = CachedMarginfiAccount::from(slot, address, marginfi_account);
+
+        // health = (1000 - 1500) / 1000 = -0.5 -> to_num::<i64>() = -1
+        assert_eq!(cached.health(), Some(-1));
     }
 }

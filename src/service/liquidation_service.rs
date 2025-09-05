@@ -75,8 +75,8 @@ impl<T: CommsClient> LiquidationService<T> {
     }
 }
 
-fn sort_accounts_by_health(accounts: &HashMap<Pubkey, u64>) -> Vec<Pubkey> {
-    let mut sorted: Vec<(Pubkey, u64)> = accounts.iter().map(|(&k, &v)| (k, v)).collect();
+fn sort_accounts_by_health(accounts: &HashMap<Pubkey, i64>) -> Vec<Pubkey> {
+    let mut sorted: Vec<(Pubkey, i64)> = accounts.iter().map(|(&k, &v)| (k, v)).collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
     sorted.into_iter().map(|(k, _)| k).collect()
 }
