@@ -15,10 +15,12 @@ impl LiquidationStrategy for BasicLiquidationStrategy {
         &self,
         _account: &CachedMarginfiAccount,
     ) -> anyhow::Result<Option<LiquidationParams>> {
-        debug!("Preparing account {:?} for liquidation.", _account);
+        debug!("Evaluating account {:?} for liquidation.", _account);
         /*
         1. Calc total account's  assets amount in USD.
         2. Calc total account's liab amount in USD.
+        // get_account_health_components(bank_accounts_with_price, emode_config, requirement_type, optional health_cache)
+
         3. Confirm that the account is liquidable.
         4. Select collat and liab banks.
         5. Calc the collat withdraw and liab repay amounts.
